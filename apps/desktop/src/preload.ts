@@ -5,6 +5,7 @@ import type {
   DesktopPreviewRecordingInputEvent,
   DesktopPreviewTabState,
   DesktopSnapShotEvent,
+  DesktopVoiceDelivery,
 } from "@t3tools/contracts";
 import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
@@ -219,6 +220,25 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     return () => {
       ipcRenderer.removeListener(IpcChannels.MENU_ACTION_CHANNEL, wrappedListener);
     };
+  },
+  voice: {
+    reportThreads: (threads, active) =>
+      ipcRenderer.send(IpcChannels.VOICE_THREADS_CHANNEL, threads, active),
+    reportReply: (reply) => ipcRenderer.send(IpcChannels.VOICE_REPLY_CHANNEL, reply),
+    reportActivity: (thread, activity) =>
+      ipcRenderer.send(IpcChannels.VOICE_ACTIVITY_CHANNEL, thread, activity),
+    onDelivery: (listener) => {
+      const wrappedListener = (_event: Electron.IpcRendererEvent, delivery: unknown) => {
+        if (typeof delivery !== "object" || delivery === null) return;
+        listener(delivery as DesktopVoiceDelivery);
+      };
+      ipcRenderer.on(IpcChannels.VOICE_DELIVERY_CHANNEL, wrappedListener);
+      return () => {
+        ipcRenderer.removeListener(IpcChannels.VOICE_DELIVERY_CHANNEL, wrappedListener);
+      };
+    },
+    completeDelivery: (id, error) =>
+      ipcRenderer.send(IpcChannels.VOICE_DELIVERY_DONE_CHANNEL, id, error),
   },
   onSnapShotEvent: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, event: unknown) => {

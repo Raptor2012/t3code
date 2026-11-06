@@ -83,6 +83,8 @@ export default defineConfig({
         "src/snapShot/GlobalShiftShortcutWorker.ts",
         "src/snapShot/RegionSnapShotWorker.ts",
         "src/snapShot/SnapShotAccessibilityWorker.ts",
+        "src/voice/VoiceEngineWorker.ts",
+        "src/voice/VoiceHotkeyWorker.ts",
       ],
       clean: false,
       deps: {
@@ -135,6 +137,14 @@ export default defineConfig({
       sourcemap: true,
       outExtensions: () => ({ js: ".cjs" }),
       entry: ["src/preview-pip-preload.ts"],
+    },
+    {
+      format: "cjs",
+      outDir: "dist-electron",
+      dts: false,
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: ["src/voice/orb-preload.ts"],
     },
     {
       // Sandboxed preloads must be self-contained, without shared runtime chunks.

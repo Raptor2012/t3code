@@ -48,3 +48,6 @@ node_modules/
 
 # pnpm content-addressable store; never belongs in the repo.
 .pnpm-store/
+
+# Local voice helper builds for desktop dev; release builds stage their own copy.
+apps/desktop/prod-resources/voice/

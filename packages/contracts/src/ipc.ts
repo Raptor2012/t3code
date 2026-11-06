@@ -1022,7 +1022,51 @@ export type DesktopMediaRead = typeof DesktopMediaReadSchema.Type;
 export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
+export interface DesktopVoiceThread {
+  readonly environmentId: string;
+  readonly threadId: string;
+  readonly title: string;
+}
+
+/** A finished dictation for a thread: placed in its composer, or sent as the next message. */
+export interface DesktopVoiceDelivery {
+  readonly id: number;
+  readonly environmentId: string;
+  readonly threadId: string;
+  readonly text: string;
+  readonly mode: "composer" | "send";
+  /** An earlier unsent dictation in the composer that this one replaces. */
+  readonly replaces?: string | undefined;
+}
+
+/** The agent's reply text so far in a thread, for Maeve to read aloud. */
+export interface DesktopVoiceReply {
+  readonly environmentId: string;
+  readonly threadId: string;
+  readonly messageId: string;
+  readonly text: string;
+  readonly final: boolean;
+}
+
+export type DesktopVoiceActivity = "" | "thinking" | "approval" | "input";
+
+export interface DesktopVoiceBridge {
+  readonly reportThreads: (
+    threads: readonly DesktopVoiceThread[],
+    active: DesktopVoiceThread | null,
+  ) => void;
+  readonly reportReply: (reply: DesktopVoiceReply) => void;
+  readonly reportActivity: (
+    thread: Pick<DesktopVoiceThread, "environmentId" | "threadId">,
+    activity: DesktopVoiceActivity,
+  ) => void;
+  readonly onDelivery: (listener: (delivery: DesktopVoiceDelivery) => void) => () => void;
+  readonly completeDelivery: (id: number, error?: string) => void;
+}
+
 export interface DesktopBridge {
+  /** Local voice: dictation into threads and spoken replies. Absent where the app has no voice. */
+  voice?: DesktopVoiceBridge;
   getAppBranding: () => DesktopAppBranding | null;
   getRelayTelemetryEnabled: () => boolean;
   getPathForFile: (file: File) => string;

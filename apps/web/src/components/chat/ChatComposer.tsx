@@ -296,6 +296,8 @@ export interface ChatComposerHandle {
     options?: { ensureLeadingBoundary?: boolean; clipboardData?: DataTransfer },
   ) => boolean;
   pasteTextAtEnd: (text: string, options?: { bypassAutoAttachment?: boolean }) => boolean;
+  /** Replaces the prompt with dictated text and, with `submit`, sends it as Enter would. */
+  setVoiceText: (text: string, submit: boolean) => void;
   citeAssistantText: (
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
@@ -2821,6 +2823,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsComposerModelPickerOpen(true);
   };
   const openModelPickerStable = useStableCallback(openModelPicker);
+  const setVoiceText = (text: string, submit: boolean) => {
+    promptRef.current = text;
+    setComposerDraftPrompt(composerDraftTarget, text);
+    const cursor = collapseExpandedComposerCursor(text, text.length);
+    setComposerCursor(cursor);
+    setComposerTrigger(detectComposerTrigger(text, text.length));
+    // Send-state derives from the rendered prompt, so submit after the new text renders.
+    if (submit) {
+      window.requestAnimationFrame(() =>
+        window.requestAnimationFrame(() => submitComposerStable()),
+      );
+    }
+  };
+  const setVoiceTextStable = useStableCallback(setVoiceText);
 
   useImperativeHandle(
     composerRef,
@@ -2841,6 +2857,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         countPreparingComposerImages(attachmentTargetKey) > 0 ||
         pendingDraftWork.has(attachmentTargetKey),
       insertTextAtEnd: insertComposerTextAtEndStable,
+      setVoiceText: setVoiceTextStable,
       pasteTextAtEnd: (text: string, options) => {
         const shortcutArmed = consumePasteAsTextShortcut(pasteAsTextShortcutUntilRef);
         const bypassAutoAttachment = options?.bypassAutoAttachment === true || shortcutArmed;

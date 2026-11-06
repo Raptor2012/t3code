@@ -1,0 +1,2779 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        --fg: #f2f3f7;
+        --muted: #a3a9b6;
+        --glass: rgba(20, 21, 27, 0.84);
+        --line: rgba(255, 255, 255, 0.09);
+        --spring: cubic-bezier(0.34, 1.46, 0.64, 1);
+        --soft: cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+        color: var(--fg);
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      /* Feather only the empty native-window gutter, so shadows cannot end at a hard rectangle. */
+      #stage {
+        position: absolute;
+        inset: 0;
+        --edge-x: 10px;
+        mask-image:
+          linear-gradient(
+            to right,
+            transparent,
+            #000 var(--edge-x),
+            #000 calc(100% - var(--edge-x)),
+            transparent
+          ),
+          linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+        mask-composite: intersect;
+      }
+      @media (max-width: 220px) {
+        body.bar #stage {
+          --edge-x: 2px;
+        }
+      }
+      #orbwrap {
+        position: absolute;
+        left: 50%;
+        bottom: 0;
+        width: 180px;
+        height: 150px;
+        margin-left: -90px;
+      }
+      #orb {
+        position: absolute;
+        inset: 0;
+        cursor: pointer;
+      }
+      #parts {
+        position: absolute;
+        inset: 0;
+        width: 180px;
+        height: 150px;
+        pointer-events: none;
+        mix-blend-mode: screen;
+      }
+      body.bar #parts {
+        display: none;
+      }
+      #cap {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 14px;
+        text-align: center;
+        font-size: 11.5px;
+        letter-spacing: 0.3px;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.65);
+        opacity: 0;
+        transform: translateY(5px);
+        transition:
+          opacity 0.35s var(--soft),
+          transform 0.5s var(--spring);
+        pointer-events: none;
+        white-space: nowrap;
+      }
+      #cap.show {
+        opacity: 1;
+        transform: none;
+      }
+      body[data-state="thinking"] #cap {
+        color: #d0f5ff;
+        font-weight: 600;
+        text-shadow:
+          0 0 12px rgba(35, 170, 255, 0.65),
+          0 1px 6px rgba(0, 0, 0, 0.65);
+      }
+      #orbWave {
+        position: absolute;
+        left: 42px;
+        bottom: 6px;
+        width: 96px;
+        height: 18px;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(3px) scaleX(0.85);
+        transition:
+          opacity 0.18s ease,
+          transform 0.38s var(--soft);
+      }
+      body.audio-active #orbWave {
+        opacity: 1;
+        transform: none;
+      }
+      body.audio-active #cap {
+        opacity: 0;
+      }
+
+      /* hover controls */
+      .ctl {
+        position: absolute;
+        top: 70px;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(24, 25, 31, 0.82);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(10px);
+        opacity: 0;
+        transform: scale(0.4);
+        pointer-events: none;
+        cursor: pointer;
+        transition:
+          opacity 0.2s var(--soft),
+          transform 0.45s var(--spring),
+          background 0.15s;
+      }
+      #muteMic {
+        left: 16px;
+      }
+      #muteMaeve {
+        right: 16px;
+      }
+      body.hover .ctl {
+        opacity: 1;
+        transform: none;
+        pointer-events: auto;
+      }
+      body.hover #muteMaeve {
+        transition-delay: 0.04s;
+      }
+      .ctl:hover {
+        background: rgba(44, 46, 56, 0.92);
+      }
+      .ctl:active {
+        transform: scale(0.88);
+      }
+      .ctl svg {
+        width: 15px;
+        height: 15px;
+        stroke: #e9ebf1;
+        fill: none;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .ctl .slash {
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+      .ctl.muted {
+        background: rgba(120, 30, 38, 0.85);
+        border-color: rgba(255, 120, 120, 0.4);
+      }
+      .ctl.muted .slash {
+        opacity: 1;
+      }
+      /* small persistent badge when something is muted and the controls are hidden */
+      #badge {
+        position: absolute;
+        left: 50%;
+        top: 94px;
+        margin-left: 20px;
+        font-size: 9.5px;
+        color: #ffb4b4;
+        opacity: 0;
+        transition: opacity 0.3s;
+        pointer-events: none;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+      }
+      #badge.show {
+        opacity: 1;
+      }
+      body.hover #badge {
+        opacity: 0;
+      }
+
+      /* speech bubble (T3 minimized) */
+      #bubble {
+        position: absolute;
+        left: 50%;
+        bottom: 112px;
+        width: 300px;
+        margin-left: -150px;
+        box-sizing: border-box;
+        background: var(--glass);
+        backdrop-filter: blur(20px) saturate(1.35);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 9px 13px 10px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.26);
+        opacity: 0;
+        transform: translateY(6px);
+        transform-origin: 50% 100%;
+        transition:
+          opacity 0.18s ease-out,
+          transform 0.18s var(--soft);
+        pointer-events: none;
+      }
+      #bubble.show {
+        opacity: 1;
+        transform: none;
+        pointer-events: auto;
+        transition:
+          opacity 0.22s var(--soft),
+          transform 0.38s var(--spring);
+      }
+      #bubble::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        bottom: -6px;
+        width: 12px;
+        height: 12px;
+        margin-left: -6px;
+        background: rgba(20, 21, 27, 0.92);
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        transform: rotate(45deg);
+        border-radius: 0 0 3px 0;
+      }
+      #who {
+        font-size: 10px;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        color: #c4a8ff;
+        margin-bottom: 3px;
+      }
+      #bubble.you #who {
+        color: #ffcf8a;
+      }
+      #bubbleText {
+        position: relative;
+        font-size: 13px;
+        line-height: 1.45;
+        min-height: 1.45em;
+        max-height: 113px;
+        overflow: hidden;
+        overflow-anchor: none;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      #bmeasure {
+        visibility: hidden;
+        pointer-events: none;
+      }
+      #btext {
+        position: absolute;
+        inset: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        overflow-anchor: none;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(177, 190, 218, 0.4) transparent;
+      }
+      #btext.scrolled {
+        mask-image: linear-gradient(to bottom, transparent, #000 12px);
+        -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12px);
+      }
+      #bubble.settled #btext {
+        animation: settle 0.65s ease-out;
+      }
+      @keyframes settle {
+        0% {
+          text-shadow: 0 0 9px rgba(190, 218, 255, 0.7);
+        }
+        100% {
+          text-shadow: none;
+        }
+      }
+      #bubble::before,
+      #card::before,
+      #review::before {
+        content: "";
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        top: 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(224, 236, 255, 0.45), transparent);
+        pointer-events: none;
+      }
+      #playbackTrack {
+        position: absolute;
+        left: 19px;
+        right: 19px;
+        bottom: 2px;
+        height: 2px;
+        border-radius: 2px;
+        overflow: hidden;
+        background: rgba(195, 200, 230, 0.12);
+        opacity: 0;
+        pointer-events: none;
+      }
+      #playbackTrack.active {
+        opacity: 1;
+      }
+      #playbackFill {
+        height: 100%;
+        width: 100%;
+        transform-origin: left;
+        background: linear-gradient(90deg, #75e5e0, #bd9cff);
+      }
+      #playbackTrack.indeterminate #playbackFill {
+        width: 32%;
+        animation: playbackTravel 1.8s ease-in-out infinite alternate;
+      }
+      @keyframes playbackTravel {
+        from {
+          transform: translateX(0);
+        }
+        to {
+          transform: translateX(210%);
+        }
+      }
+      #bubble.you #btext {
+        color: #d9dce3;
+      }
+      #bubbleText .word {
+        display: inline-block;
+        max-width: 100%;
+      }
+      #btext .fresh {
+        animation: ink 0.42s var(--soft) both;
+        animation-delay: var(--ink-delay, 0ms);
+      }
+      @keyframes ink {
+        from {
+          opacity: 0;
+          filter: blur(4px);
+          transform: translateY(5px);
+        }
+        to {
+          opacity: 1;
+          filter: blur(0);
+          transform: none;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #btext .fresh {
+          animation: none;
+        }
+      }
+
+      /* minimize chip (orb mode, on hover) */
+      #toBar {
+        position: absolute;
+        left: 118px;
+        top: 36px;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(24, 25, 31, 0.82);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        cursor: pointer;
+        opacity: 0;
+        transform: scale(0.4);
+        pointer-events: none;
+        transition:
+          opacity 0.2s var(--soft),
+          transform 0.45s var(--spring),
+          background 0.15s;
+        transition-delay: 0.08s;
+      }
+      body.hover #toBar {
+        opacity: 1;
+        transform: none;
+        pointer-events: auto;
+      }
+      #toBar:hover {
+        background: rgba(44, 46, 56, 0.92);
+      }
+      #toBar svg {
+        width: 12px;
+        height: 12px;
+        stroke: #e9ebf1;
+        fill: none;
+        stroke-width: 2;
+        stroke-linecap: round;
+      }
+
+      /* toolbar (minimized) */
+      #bar {
+        position: absolute;
+        left: 50%;
+        bottom: 4px;
+        width: 196px;
+        height: 40px;
+        margin-left: -98px;
+        box-sizing: border-box;
+        border-radius: 20px;
+        display: none;
+        align-items: center;
+        gap: 4px;
+        padding: 0 6px 0 0;
+        background: rgba(18, 19, 24, 0.86);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(18px) saturate(1.3);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
+      }
+      body.bar #bar {
+        display: flex;
+        animation: barIn 0.5s var(--spring);
+      }
+      body.bar #orbwrap {
+        display: none;
+      }
+      @keyframes barIn {
+        from {
+          transform: scale(0.6);
+          opacity: 0;
+        }
+        to {
+          transform: none;
+          opacity: 1;
+        }
+      }
+      #barOrb {
+        width: 40px;
+        height: 40px;
+        flex: none;
+        position: relative;
+        cursor: pointer;
+      }
+      body.bar #orb {
+        inset: auto;
+        left: -8px;
+        top: -8px;
+      }
+      #wave {
+        width: 52px;
+        height: 24px;
+        flex: none;
+      }
+      .bbtn {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.06);
+        transition:
+          background 0.15s,
+          transform 0.35s var(--spring);
+      }
+      .bbtn:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .bbtn:active {
+        transform: scale(0.86);
+      }
+      .bbtn svg {
+        width: 14px;
+        height: 14px;
+        stroke: #e9ebf1;
+        fill: none;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .bbtn .slash {
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+      .bbtn.muted {
+        background: rgba(120, 30, 38, 0.85);
+      }
+      .bbtn.muted .slash {
+        opacity: 1;
+      }
+      body.bar #bubble {
+        bottom: 56px;
+      }
+      body.bar #card {
+        bottom: 54px;
+        max-height: calc(100% - 64px);
+      }
+      body.bar #cap,
+      body.bar #badge {
+        display: none;
+      }
+
+      /* settings card */
+      #card {
+        min-height: 200px;
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        bottom: 150px;
+        max-height: calc(100% - 160px);
+        background: var(--glass);
+        backdrop-filter: blur(18px) saturate(1.3);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 10px 12px 10px;
+        box-sizing: border-box;
+        opacity: 0;
+        transform: translateY(14px) scale(0.94);
+        transform-origin: 50% 100%;
+        transition:
+          opacity 0.25s ease,
+          transform 0.45s var(--spring);
+        pointer-events: none;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.26);
+      }
+      #card:not(.open):not(.closing) {
+        visibility: hidden;
+        transition: none;
+      }
+      #card.closing {
+        visibility: visible;
+        opacity: 0;
+        transform: translateY(6px) scale(0.985);
+        pointer-events: none;
+        transition:
+          opacity 0.14s ease-out,
+          transform 0.14s ease-out;
+      }
+      #card.open {
+        visibility: visible;
+        opacity: 1;
+        transform: none;
+        pointer-events: auto;
+      }
+      #devices {
+        position: absolute;
+        inset: 0;
+        box-sizing: border-box;
+        padding: 12px 14px;
+        border-radius: 20px;
+        background: rgba(22, 23, 29, 0.97);
+        display: none;
+        flex-direction: column;
+        gap: 7px;
+      }
+      #devices.open {
+        display: flex;
+      }
+      #devices .dhead {
+        font-size: 12.5px;
+        color: var(--fg);
+      }
+      #devices label {
+        font-size: 10.5px;
+        color: var(--muted);
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      #devices select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 5px 8px;
+        border-radius: 9px;
+        border: 1px solid var(--line);
+        background: #292b34;
+        color: var(--fg);
+        font:
+          11.5px "Segoe UI",
+          sans-serif;
+      }
+      #devices .dnote {
+        font-size: 9.5px;
+        color: var(--muted);
+        line-height: 1.35;
+      }
+      #devices .dfoot {
+        margin-top: auto;
+        display: flex;
+        justify-content: flex-end;
+      }
+      #devices .dfoot span {
+        font-size: 11px;
+        color: var(--fg);
+        cursor: pointer;
+        padding: 3px 8px;
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+      #delivery {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 7px;
+        padding: 5px 8px;
+        border-radius: 9px;
+        border: 1px solid var(--line);
+        background: #292b34;
+        color: var(--fg);
+        font:
+          11.5px "Segoe UI",
+          sans-serif;
+      }
+      #review {
+        display: none;
+        position: absolute;
+        left: 50%;
+        bottom: 112px;
+        width: 300px;
+        margin-left: -150px;
+        box-sizing: border-box;
+        padding: 11px 13px;
+        border-radius: 18px;
+        background: var(--glass);
+        border: 1px solid var(--line);
+        backdrop-filter: blur(20px);
+        box-shadow: 0 7px 18px rgba(0, 0, 0, 0.24);
+      }
+      #review.show {
+        display: block;
+        animation: barIn 0.35s var(--spring);
+      }
+      body.bar #review {
+        bottom: 56px;
+      }
+      #reviewTitle {
+        font-size: 10px;
+        color: #c4a8ff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 5px;
+      }
+      #reviewText {
+        width: 100%;
+        height: 70px;
+        resize: none;
+        border: 0;
+        outline: none;
+        background: transparent;
+        color: var(--fg);
+        font:
+          13px/1.4 "Segoe UI",
+          sans-serif;
+        box-sizing: border-box;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      #review .foot {
+        margin-top: 5px;
+      }
+      #review button {
+        border: 0;
+        border-radius: 9px;
+        padding: 5px 9px;
+        background: rgba(139, 114, 255, 0.25);
+        color: var(--fg);
+        cursor: pointer;
+      }
+      #review button:disabled {
+        opacity: 0.5;
+        cursor: wait;
+      }
+      [aria-disabled="true"] {
+        pointer-events: none;
+        opacity: 0.5;
+      }
+      [role="button"]:focus-visible,
+      button:focus-visible,
+      select:focus-visible {
+        outline: 2px solid #b9a0ff;
+        outline-offset: 3px;
+      }
+      body.reviewing #bubble {
+        display: none;
+      }
+      .thread {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12.5px;
+        cursor: pointer;
+        padding: 6px 8px;
+        border-radius: 10px;
+      }
+      .thread:hover {
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .thread .t {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .thread .chev {
+        color: var(--muted);
+        font-size: 10px;
+      }
+      #list {
+        display: none;
+        max-height: 110px;
+        overflow: auto;
+        margin: 4px 0 6px;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+      #list.open {
+        display: block;
+      }
+      #list div {
+        padding: 6px 8px;
+        font-size: 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #list div:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .pill {
+        flex: 1;
+        text-align: center;
+        font-size: 11.5px;
+        padding: 7px 6px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition:
+          background 0.15s,
+          border-color 0.15s,
+          transform 0.35s var(--spring);
+        white-space: nowrap;
+      }
+      .pill:hover {
+        background: rgba(255, 255, 255, 0.12);
+      }
+      .pill:active {
+        transform: scale(0.94);
+      }
+      .pill.on {
+        background: rgba(111, 141, 255, 0.22);
+        border-color: rgba(111, 141, 255, 0.5);
+      }
+      .pill.danger:hover {
+        background: rgba(255, 94, 94, 0.22);
+      }
+      .modehint {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .foot {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 10px;
+        font-size: 10.5px;
+        color: var(--muted);
+      }
+      .foot span {
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 6px;
+      }
+      .foot span:hover {
+        color: var(--fg);
+        background: rgba(255, 255, 255, 0.06);
+      }
+      #menu {
+        position: absolute;
+        right: 14px;
+        bottom: 40px;
+        background: rgba(30, 31, 38, 0.97);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 6px;
+        display: none;
+        min-width: 220px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      }
+      #menu {
+        max-height: calc(100% - 44px);
+        overflow-y: auto;
+        scrollbar-width: thin;
+      }
+      #menu.open {
+        display: block;
+      }
+      #appearance {
+        position: absolute;
+        inset: 0;
+        padding: 12px 14px;
+        border-radius: 20px;
+        box-sizing: border-box;
+        background: rgba(22, 23, 29, 0.98);
+        display: none;
+        flex-direction: column;
+        gap: 10px;
+      }
+      #appearance.open {
+        display: flex;
+      }
+      #card:has(#appearance.open) > :not(#appearance),
+      #card:has(#devices.open) > :not(#devices) {
+        visibility: hidden;
+      }
+      #appearance .dhead {
+        font-size: 12.5px;
+      }
+      #appearance label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 12px;
+        gap: 8px;
+        cursor: pointer;
+      }
+      #appearance input {
+        accent-color: #b4a0ff;
+        width: 17px;
+        height: 17px;
+        flex: none;
+      }
+      #appearance .dnote {
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.4;
+      }
+      #appearance button {
+        align-self: flex-end;
+        margin-top: auto;
+        border: 1px solid var(--line);
+        background: #30323b;
+        color: var(--fg);
+        border-radius: 8px;
+        padding: 4px 10px;
+        cursor: pointer;
+      }
+      body.high-contrast {
+        --fg: #fff;
+        --muted: #e0e6ef;
+        --glass: rgba(9, 12, 20, 0.98);
+        --line: rgba(222, 236, 255, 0.65);
+      }
+      body.high-contrast #devices,
+      body.high-contrast #appearance {
+        background: #090c14;
+      }
+      body.high-contrast #btext,
+      body.high-contrast #who,
+      body.high-contrast #bubble.you #btext,
+      body.high-contrast #bubble.you #who {
+        color: #fff;
+      }
+      body.high-contrast #bar {
+        background: #090c14;
+        border-color: #cbd7ee;
+      }
+      body.high-contrast #devices label {
+        color: var(--fg);
+      }
+      body.reduced-motion *,
+      body.reduced-motion *::before,
+      body.reduced-motion *::after {
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+          scroll-behavior: auto !important;
+        }
+      }
+      body.reduced-motion #playbackTrack.indeterminate #playbackFill {
+        transform: translateX(100%);
+      }
+
+      #menu div {
+        padding: 5px 10px;
+        font-size: 12px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      #menu div:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+      #menu div.on::before {
+        content: "✓ ";
+        color: #8fb0ff;
+      }
+      #menu div:not(.on)::before {
+        content: "\2003";
+      }
+      #detail {
+        font-size: 10.5px;
+        color: var(--muted);
+        margin-top: 8px;
+        min-height: 14px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <div id="bubble">
+        <div id="who">Maeve</div>
+        <div id="bubbleText">
+          <div id="bmeasure" aria-hidden="true"></div>
+          <div id="btext"></div>
+        </div>
+      </div>
+      <div id="card">
+        <div class="thread" id="threadBtn">
+          <span class="t" id="threadName">Choose a thread</span><span class="chev">▼</span>
+        </div>
+        <div id="list"></div>
+        <div class="row">
+          <div class="pill" id="pVoice">Voice off</div>
+          <span class="modehint" id="pMode">Hold to talk</span>
+          <div class="pill danger" id="pStop">Stop</div>
+        </div>
+        <div id="detail"></div>
+        <select
+          id="delivery"
+          title="Choose how your transcript is delivered"
+          aria-label="Transcript delivery"
+        >
+          <option value="immediate">Send immediately</option>
+          <option value="review">Review above the orb · Enter to send</option>
+          <option value="composer">Draft in T3 · Enter there to send</option>
+        </select>
+        <div class="foot">
+          <span id="fTest">Test Maeve</span><span id="fMore">Options ⋯</span
+          ><span id="fQuit">Quit</span>
+        </div>
+        <div id="menu">
+          <div id="mFollow">Follow active T3 thread</div>
+          <div id="mCleanup">Clean up with OpenWhispr's model</div>
+          <div id="mStartup">Start with Windows</div>
+          <div id="mFx">Techno audio effect</div>
+          <div id="mDock">Minimize to toolbar</div>
+          <div id="mDevices">Audio devices…</div>
+          <div id="mAppearance">Appearance…</div>
+        </div>
+        <div id="appearance" aria-label="Appearance">
+          <div class="dhead">Appearance</div>
+          <label for="contrastSel">High contrast<input id="contrastSel" type="checkbox" /></label>
+          <label for="motionSel">Reduced motion<input id="motionSel" type="checkbox" /></label>
+          <div class="dnote" id="motionNote">
+            Keeps state colours and audio levels. Windows reduced-motion settings are always
+            respected.
+          </div>
+          <button id="appearanceDone" type="button">Done</button>
+        </div>
+        <div id="devices" aria-label="Audio devices">
+          <div class="dhead">Audio devices</div>
+          <label>Speaker (Maeve's voice)<select id="spkSel"></select></label>
+          <label>Microphone (orb levels and live preview)<select id="micSel"></select></label>
+          <div class="dnote">
+            Dictation itself is recorded by OpenWhispr with the mic chosen in its own settings.
+          </div>
+          <div class="dfoot"><span id="devDone">Done</span></div>
+        </div>
+      </div>
+      <div id="review">
+        <div id="reviewTitle" aria-live="polite"></div>
+        <textarea
+          id="reviewText"
+          aria-label="Review transcript"
+          placeholder="Review your words…"
+        ></textarea>
+        <div class="foot">
+          <span id="reviewCancel">Cancel · Esc</span><span>Shift+Enter: new line</span
+          ><button id="reviewSend">Send ↵</button>
+        </div>
+      </div>
+      <div id="orbwrap">
+        <canvas id="orb" aria-label="Open settings"></canvas>
+        <canvas id="parts" aria-hidden="true"></canvas>
+        <div class="ctl" id="muteMic" title="Mute my microphone">
+          <svg viewBox="0 0 24 24">
+            <rect x="9" y="3" width="6" height="11" rx="3" />
+            <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+            <path class="slash" d="M4 4l16 16" />
+          </svg>
+        </div>
+        <div class="ctl" id="muteMaeve" title="Mute Maeve">
+          <svg viewBox="0 0 24 24">
+            <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+            <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
+            <path class="slash" d="M4 4l16 16" />
+          </svg>
+        </div>
+        <div id="toBar" title="Minimize to toolbar">
+          <svg viewBox="0 0 24 24"><path d="M5 17h14" /></svg>
+        </div>
+        <div id="badge"></div>
+        <canvas id="orbWave" aria-hidden="true"></canvas>
+        <div id="cap" role="status" aria-live="polite"></div>
+      </div>
+      <div id="bar">
+        <div
+          id="playbackTrack"
+          role="progressbar"
+          aria-label="Maeve playback"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
+          <div id="playbackFill"></div>
+        </div>
+        <div id="barOrb" title="Settings"></div>
+        <canvas id="wave"></canvas>
+        <div class="bbtn" id="barMic" title="Mute my microphone">
+          <svg viewBox="0 0 24 24">
+            <rect x="9" y="3" width="6" height="11" rx="3" />
+            <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+            <path class="slash" d="M4 4l16 16" />
+          </svg>
+        </div>
+        <div class="bbtn" id="barMaeve" title="Mute Maeve">
+          <svg viewBox="0 0 24 24">
+            <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+            <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
+            <path class="slash" d="M4 4l16 16" />
+          </svg>
+        </div>
+        <div class="bbtn" id="barExpand" title="Expand to orb">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5" /></svg>
+        </div>
+      </div>
+    </div>
+
+    <script id="vs" type="x-shader/x-vertex">
+      attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }
+    </script>
+    <script id="fs" type="x-shader/x-fragment">
+      precision highp float;
+      uniform vec2 uRes;      // canvas size in device px
+      uniform vec2 uCenter;   // orb centre in device px
+      uniform float uR;       // orb radius in device px (spring-animated)
+      uniform float uTime;
+      uniform float uLevel;   // 0..1 spring-animated audio level
+      uniform float uGlow;    // 0..1 halo strength
+      uniform float uBusy;    // 0..1 busy ring visibility
+      uniform float uSpin;    // busy ring angle
+      uniform float uArc;     // busy ring arc length
+      uniform float uOff;     // 0..1 voice-off desaturation
+      uniform vec3 uA, uB, uC; // palette: deep, mid, bright
+      uniform float uAppear;  // 0..1 pop-in
+      uniform vec4 uBands;    // smoothed voice energy: low, low-mid, high-mid, high
+      uniform float uFlow;    // time that runs faster while someone speaks (never jumps)
+      uniform float uParticles; // 0..1 particle presence
+      uniform float uThinking, uRipple, uApproval, uIdle, uContrast;
+      uniform vec3 uThread;
+      uniform float uTap;     // signed tap envelope: + opening settings, - closing
+      uniform float uPress;   // 0..1 while the orb is held down
+      uniform vec2 uTapWave;  // soft fluid wave after a tap: radius (in orb radii), strength
+
+      vec3 hash3(vec3 p){ p = vec3(dot(p,vec3(127.1,311.7,74.7)), dot(p,vec3(269.5,183.3,246.1)), dot(p,vec3(113.5,271.9,124.6))); return -1.0 + 2.0*fract(sin(p)*43758.5453123); }
+      float noise(vec3 p){ vec3 i = floor(p); vec3 f = fract(p); vec3 u = f*f*(3.0-2.0*f);
+        return mix(mix(mix(dot(hash3(i+vec3(0,0,0)),f-vec3(0,0,0)), dot(hash3(i+vec3(1,0,0)),f-vec3(1,0,0)),u.x),
+                       mix(dot(hash3(i+vec3(0,1,0)),f-vec3(0,1,0)), dot(hash3(i+vec3(1,1,0)),f-vec3(1,1,0)),u.x),u.y),
+                   mix(mix(dot(hash3(i+vec3(0,0,1)),f-vec3(0,0,1)), dot(hash3(i+vec3(1,0,1)),f-vec3(1,0,1)),u.x),
+                       mix(dot(hash3(i+vec3(0,1,1)),f-vec3(0,1,1)), dot(hash3(i+vec3(1,1,1)),f-vec3(1,1,1)),u.x),u.y),u.z); }
+      float fbm(vec3 p){ float v = 0.0, a = 0.5; for (int i=0;i<4;i++){ v += a*noise(p); p = p*2.03 + 7.1; a *= 0.5; } return v; }
+
+      void main(){
+        vec2 px = gl_FragCoord.xy;
+        vec2 d = (px - uCenter) / uR;
+        float t = uTime;
+        float ang = atan(d.y, d.x);
+        // fluid silhouette: low-frequency wobble that grows with level
+        float fl = uFlow;
+        // fluid silhouette: two slow noise octaves; voice makes it breathe and flow, never form shapes
+        float edgeNoise = noise(vec3(cos(ang)*0.9, sin(ang)*0.9, fl*0.38)) * 0.65
+                        + noise(vec3(cos(ang)*1.8 + 3.1, sin(ang)*1.8, fl*0.55)) * 0.35;
+        float wob = 1.0 + (0.014 + 0.12*uLevel + 0.06*uBands.x + 0.10*abs(uTap)) * edgeNoise;   // a tap makes the surface ripple like jelly
+        float r = length(d) / wob;
+        vec4 col = vec4(0.0);
+
+        // voice bloom: absent at rest (keeps the deep-space look), glows outward while someone speaks
+        float bloom = exp(-max(0.0, r - 1.0) * (5.0 - 1.6*uLevel)) * smoothstep(0.98, 1.04, r);
+        float bloomAlpha = bloom * (0.32*uLevel + 0.22*uThinking);
+        col += vec4(mix(uB, uC, 0.4) * bloomAlpha, bloomAlpha);
+
+        // busy ring
+        if (uBusy > 0.001) {
+          float a = mod(uSpin - ang, 6.2831853);
+          float seg = exp(-a*2.8) * (1.0-smoothstep(1.6,2.2,a));
+          float dotted = 0.6 + 0.4*pow(0.5+0.5*cos(a*48.0),4.0);
+          float ring = 1.0-smoothstep(0.01,0.035,abs(r-1.23));
+          float ringAlpha = 0.85 * ring * seg * dotted * uBusy;
+          col += vec4(uC * ringAlpha, ringAlpha);
+        }
+
+        if (uRipple > 0.0) {
+          float wave = 1.0-smoothstep(0.008,0.045,abs(r-(1.0+(1.0-uRipple)*0.95)));
+          float alpha = wave*uRipple*0.48;
+          col += vec4(uC*alpha,alpha);
+        }
+        if (uApproval > 0.0) {
+          float edge = exp(-abs(r-1.04)*34.0)*uApproval;
+          col += vec4(vec3(1.0,0.63,0.19)*edge,edge);
+        }
+        // Tap: a soft, wobbling wave flows outward when settings open and inward when they close.
+        if (uTapWave.y > 0.0) {
+          float tw = exp(-pow((r-uTapWave.x)/0.075, 2.0)) * smoothstep(0.96, 1.03, r);
+          float alpha = tw*uTapWave.y;
+          col += vec4(mix(uB, uC, 0.55)*alpha, alpha);
+        }
+
+        // sphere: deep-space nebula with a dark core and a glowing rim (black-hole feel)
+        if (r < 1.0) {
+          float z = sqrt(max(0.0, 1.0 - r*r));
+          vec3 n = normalize(vec3(d.x/wob, d.y/wob, z));
+          vec3 sp = vec3(n.xy*1.2, z*0.6);
+          // Thinking uses the same continuous fluid field as speech, with a gentle inward twist.
+          float turn = uThinking*(fl*0.16 + r*0.65) + uIdle*0.08*sin(fl*0.28)
+                     + uTap*(1.0-r)*(1.0-r)*2.4;                                        // a tap stirs the core, then it unwinds
+          sp.xy = mat2(cos(turn),-sin(turn),sin(turn),cos(turn))*sp.xy;
+          sp.xy *= 1.0 + uThinking*0.06*sin(fl*0.38-r*2.0) + uIdle*0.025*sin(fl*0.45-r*1.4);
+          vec3 warp = vec3(fbm(sp*0.9 + vec3(0.0, fl*0.16, fl*0.10)), fbm(sp*0.9 + vec3(5.2, -fl*0.12, fl*0.08)), 0.0);
+          float f1 = fbm(sp*1.3 + warp*1.6 + vec3(fl*0.10, -fl*0.07, fl*0.12 + 0.25*uLevel));
+          float f2 = fbm(sp*2.0 - warp*1.2 + vec3(-fl*0.16, fl*0.09, 3.0));
+          float band = smoothstep(-0.35, 0.45, f1 + 0.30*f2);
+          vec3 body = mix(uA * 0.22, uB * 0.62, band);                                   // dark nebula base
+          body += mix(uB, uC, 0.5) * smoothstep(0.30, 0.80, f2 + 0.45*uLevel) * (0.2 + 0.5*uLevel);  // filaments flare with voice, coloured not white
+          float core = smoothstep(0.0, 0.9, r);                                          // the centre falls into shadow
+          body *= mix(min(1.0,0.25 + 0.75*uLevel + 0.55*uThinking + 0.13*uIdle + 0.35*abs(uTap) + 0.22*uPress), 1.0, core);                                    // the core lights up as you speak
+          vec3 L = normalize(vec3(-0.55, 0.75, 0.6));
+          float fres = pow(1.0 - max(0.0, n.z), 2.2);
+          vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
+          float spec = pow(max(0.0, dot(n, H)), 220.0) * 0.28;
+          float h = 0.5 + 0.5*n.y;                                                       // 0 = bottom, 1 = top
+          vec4 zone = vec4(1.0 - smoothstep(0.0, 0.4, h), exp(-pow((h-0.38)/0.2, 2.0)), exp(-pow((h-0.66)/0.2, 2.0)), smoothstep(0.65, 1.0, h));
+          float rimBand = dot(zone, uBands);                                             // spectrum mapped around the rim
+          vec3 c = body + mix(uB, uC, 0.4) * fres * (0.65 + 0.45*uLevel + 1.1*rimBand + 0.55*abs(uTap) + 0.25*uPress) + mix(vec3(1.0), uC, 0.6) * spec;
+          // A stable thread rim is independent of functional state colour.
+          c += uThread * pow(r,18.0) * (0.23 + 0.25*uContrast);
+          c += mix(uB,uC,0.25)*uThinking*(0.12+0.07*band);
+          // Sparse stars stay inside the dark core; reduced motion freezes their time.
+          vec2 grid = floor(d*28.0);
+          vec2 star = fract(hash3(vec3(grid,7.0)).xy*17.0)*0.7+0.15;
+          float point = 1.0-smoothstep(0.025,0.10,length(fract(d*28.0)-star));
+          float sparse = step(0.94,fract(sin(dot(grid,vec2(127.1,311.7)))*43758.54));
+          c += mix(uC,vec3(1.0),0.35)*point*sparse*(1.0-smoothstep(0.65,0.85,r))*(0.10+0.08*sin(t*0.6+grid.x))*uIdle;
+          c += uC*pow(r,12.0)*uContrast*0.35;
+          float desat = dot(c, vec3(0.299,0.587,0.114));
+          c = mix(c, vec3(desat)*0.9, uOff*0.75);
+          float edge = 1.0 - smoothstep(0.985, 1.0, r);
+          col = mix(col, vec4(c, 1.0), edge);
+        }
+        float a = clamp(uAppear, 0.0, 1.0);
+        float alpha = clamp(col.a, 0.0, 1.0);
+        float canvasEdge = min(min(px.x, uRes.x-px.x), min(px.y, uRes.y-px.y));
+        float fade = smoothstep(0.0, max(1.0, uR*0.2), canvasEdge);
+        // WebView2 requires premultiplied RGB <= alpha, including the translucent halo.
+        gl_FragColor = vec4(clamp(col.rgb, vec3(0.0), vec3(alpha)), alpha) * a * fade;
+      }
+    </script>
+
+    <script>
+      const PAL = {
+        thinking: { a: [0.02, 0.28, 0.58], b: [0.12, 0.74, 1.0], c: [0.7, 0.96, 1.0], glow: 1.0 },
+        approval: { a: [0.3, 0.16, 0.03], b: [0.9, 0.52, 0.12], c: [1.0, 0.79, 0.37], glow: 0.85 },
+        input: { a: [0.19, 0.13, 0.36], b: [0.61, 0.44, 0.85], c: [0.88, 0.78, 1.0], glow: 0.65 },
+        loading: { a: [0.2, 0.21, 0.26], b: [0.42, 0.44, 0.52], c: [0.72, 0.74, 0.8], glow: 0.25 },
+        off: { a: [0.16, 0.17, 0.22], b: [0.36, 0.38, 0.46], c: [0.62, 0.64, 0.72], glow: 0.2 },
+        ready: { a: [0.02, 0.3, 0.34], b: [0.1, 0.7, 0.62], c: [0.55, 0.98, 0.85], glow: 0.55 },
+        hearing: { a: [0.42, 0.16, 0.02], b: [0.98, 0.56, 0.14], c: [1.0, 0.86, 0.5], glow: 0.95 },
+        transcribing: {
+          a: [0.08, 0.14, 0.46],
+          b: [0.3, 0.46, 1.0],
+          c: [0.7, 0.82, 1.0],
+          glow: 0.8,
+        },
+        sending: { a: [0.08, 0.14, 0.46], b: [0.3, 0.46, 1.0], c: [0.7, 0.82, 1.0], glow: 0.8 },
+        waiting: { a: [0.1, 0.12, 0.42], b: [0.36, 0.44, 0.98], c: [0.74, 0.8, 1.0], glow: 0.6 },
+        speaking: { a: [0.28, 0.06, 0.48], b: [0.68, 0.36, 1.0], c: [0.92, 0.78, 1.0], glow: 1.0 },
+        reading: { a: [0.2, 0.08, 0.36], b: [0.52, 0.34, 0.86], c: [0.84, 0.76, 0.98], glow: 0.6 },
+        stopped: { a: [0.18, 0.19, 0.24], b: [0.4, 0.42, 0.5], c: [0.68, 0.7, 0.76], glow: 0.3 },
+        dictating: { a: [0.1, 0.3, 0.52], b: [0.52, 0.84, 1.0], c: [0.92, 0.98, 1.0], glow: 0.95 },
+        processing: {
+          a: [0.04, 0.28, 0.4],
+          b: [0.24, 0.72, 0.86],
+          c: [0.7, 0.96, 1.0],
+          glow: 0.75,
+        },
+        reviewing: {
+          a: [0.2, 0.08, 0.36],
+          b: [0.52, 0.34, 0.86],
+          c: [0.84, 0.76, 0.98],
+          glow: 0.6,
+        },
+        done: { a: [0.04, 0.34, 0.16], b: [0.24, 0.86, 0.46], c: [0.78, 1.0, 0.84], glow: 1.0 },
+        failed: { a: [0.4, 0.06, 0.08], b: [1.0, 0.3, 0.32], c: [1.0, 0.72, 0.7], glow: 0.9 },
+        error: { a: [0.4, 0.06, 0.08], b: [1.0, 0.3, 0.32], c: [1.0, 0.72, 0.7], glow: 0.9 },
+      };
+      const LABEL = {
+        thinking: "Thinking",
+        approval: "Waiting for approval",
+        input: "Waiting for your answer",
+        loading: "Loading Maeve…",
+        off: "Voice off",
+        ready: "",
+        hearing: "Listening",
+        transcribing: "Transcribing",
+        sending: "Sending",
+        waiting: "Sent",
+        speaking: "",
+        reading: "",
+        stopped: "Stopped",
+        error: "Error",
+        dictating: "Dictating",
+        processing: "Writing…",
+        done: "Done",
+        failed: "Dictation failed",
+      };
+
+      // Damped harmonic springs: every motion overshoots a little and settles, Apple style.
+      class Spring {
+        constructor(v, k = 170, d = 18) {
+          this.x = v;
+          this.v = 0;
+          this.k = k;
+          this.d = d;
+          this.t = v;
+        }
+        step(dt) {
+          const n = Math.max(1, Math.ceil(dt / 0.004));
+          const h = dt / n;
+          for (let i = 0; i < n; i++) {
+            const a = -this.k * (this.x - this.t) - this.d * this.v;
+            this.v += a * h;
+            this.x += this.v * h;
+          }
+          return this.x;
+        }
+      }
+      class Spring3 {
+        constructor(v, k, d) {
+          this.s = [new Spring(v[0], k, d), new Spring(v[1], k, d), new Spring(v[2], k, d)];
+        }
+        set t(v) {
+          this.s[0].t = v[0];
+          this.s[1].t = v[1];
+          this.s[2].t = v[2];
+        }
+        step(dt) {
+          return this.s.map((s) => s.step(dt));
+        }
+      }
+
+      const cv = document.getElementById("orb");
+      let W = 180,
+        H = 150,
+        CX = 90,
+        CY = 84,
+        R = 30,
+        barMode = false;
+      const dpr = window.devicePixelRatio || 1;
+      function layout(bar) {
+        barMode = bar;
+        document.body.classList.toggle("bar", bar);
+        if (bar) {
+          W = 56;
+          H = 56;
+          CX = 28;
+          CY = 28;
+          R = 11;
+          document.getElementById("barOrb").appendChild(cv);
+        } else {
+          W = 180;
+          H = 150;
+          CX = 90;
+          CY = 84;
+          R = 30;
+          document.getElementById("orbwrap").prepend(cv);
+        }
+        cv.width = W * dpr;
+        cv.height = H * dpr;
+        cv.style.width = W + "px";
+        cv.style.height = H + "px";
+      }
+      layout(false);
+      const gl = cv.getContext("webgl", { alpha: true, premultipliedAlpha: true, antialias: true });
+      function sh(type, src) {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+        return s;
+      }
+      const prog = gl.createProgram();
+      gl.attachShader(prog, sh(gl.VERTEX_SHADER, document.getElementById("vs").textContent));
+      gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, document.getElementById("fs").textContent));
+      gl.linkProgram(prog);
+      gl.useProgram(prog);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+        gl.STATIC_DRAW,
+      );
+      const aLoc = gl.getAttribLocation(prog, "a");
+      gl.enableVertexAttribArray(aLoc);
+      gl.vertexAttribPointer(aLoc, 2, gl.FLOAT, false, 0, 0);
+      const U = {};
+      for (const n of [
+        "uRes",
+        "uCenter",
+        "uR",
+        "uTime",
+        "uLevel",
+        "uGlow",
+        "uBusy",
+        "uSpin",
+        "uArc",
+        "uOff",
+        "uA",
+        "uB",
+        "uC",
+        "uAppear",
+        "uBands",
+        "uFlow",
+        "uParticles",
+        "uThinking",
+        "uRipple",
+        "uApproval",
+        "uIdle",
+        "uContrast",
+        "uThread",
+        "uTap",
+        "uPress",
+        "uTapWave",
+      ])
+        U[n] = gl.getUniformLocation(prog, n);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+      let S = {
+        state: "loading",
+        text: "",
+        mic: 0,
+        out: 0,
+        voiceOn: false,
+        mode: "openwhispr",
+        thread: "",
+        threads: [],
+        detail: "",
+        cleanup: false,
+        startup: false,
+        visible: true,
+        micMuted: false,
+        maeveMuted: false,
+        bubble: null,
+      };
+      const sA = new Spring3(PAL.loading.a, 60, 12),
+        sB = new Spring3(PAL.loading.b, 60, 12),
+        sC = new Spring3(PAL.loading.c, 60, 12);
+      const sLevel = new Spring(0, 200, 26);
+      const sScale = new Spring(1, 120, 19);
+      let audioS = 0; // level smoothed between 20 Hz status polls
+      let flow = 0;
+      const quad = [0, 0, 0, 0];
+      const sPart = new Spring(0.15, 40, 12);
+      function bandGroups(b) {
+        if (!b) return [0, 0, 0, 0];
+        const avg = (i, j) => {
+          let s = 0;
+          for (let k = i; k < j; k++) s += Math.max(0, Math.min(1, b[k] || 0));
+          return s / (j - i);
+        };
+        return [avg(0, 3), avg(3, 6), avg(6, 9), avg(9, 11)];
+      }
+      const sAppear = new Spring(0, 190, 15); // pop-in with a little overshoot
+      const sGlow = new Spring(0.25, 50, 10),
+        sBusy = new Spring(0, 80, 12),
+        sOff = new Spring(1, 40, 10);
+      let spin = 0,
+        lastT = performance.now(),
+        lastState = "",
+        expanded = false,
+        hovering = false;
+      function audioResponse(rms) {
+        const signal = Math.max(0, rms - 0.0001);
+        return Math.sqrt(signal / (signal + 0.015));
+      }
+      // Auto-gain: each source is scaled by its own recent peak, so quiet microphones read as clearly as loud ones.
+      const agc = { mic: { peak: 0.02 }, out: { peak: 0.05 } };
+      function gained(source, rms, dt) {
+        const g = agc[source];
+        g.peak = Math.max(rms, g.peak * Math.exp(-dt / 4), source === "mic" ? 0.006 : 0.008);
+        return Math.min(1, Math.pow(Math.max(0, rms) / g.peak, 0.8));
+      }
+      // Spectrum auto-gain: scale the whole spectrum between its recent floor and peak, so a quiet
+      // microphone still shows clear shape while relative differences between bands are preserved.
+      const bandAgc = { mic: { lo: 0.3, hi: 0.6 }, out: { lo: 0.3, hi: 0.6 } };
+      function gainedBands(source, bands, dt) {
+        const g = bandAgc[source],
+          vals = Array.from({ length: 11 }, (_, i) => Math.max(0, Math.min(1, bands?.[i] || 0)));
+        const mn = Math.min(...vals),
+          mx = Math.max(...vals);
+        g.hi = Math.max(mx, g.hi - dt * 0.08);
+        g.lo = Math.min(mn, g.lo + dt * 0.05);
+        return vals.map((v) => Math.max(0, Math.min(1, (v - g.lo) / Math.max(0.15, g.hi - g.lo))));
+      }
+      let liveBands = new Array(11).fill(0);
+      function playbackActive() {
+        return !!S.speaking || S.state === "speaking";
+      }
+      function visualState() {
+        if (["hearing", "dictating"].includes(S.state)) return S.state;
+        if (S.agent?.activity === "approval") return "approval";
+        if (S.agent?.activity === "input") return "input";
+        if (playbackActive()) return "speaking";
+        if (["transcribing", "processing", "sending"].includes(S.state)) return S.state;
+        return S.agent?.activity === "thinking" ? "thinking" : S.state;
+      }
+      const systemMotion = matchMedia("(prefers-reduced-motion: reduce)");
+      function motionReduced() {
+        return !!S.reducedMotion || systemMotion.matches;
+      }
+      function visualMotion(now) {
+        return motionReduced() ? 0 : now / 1000;
+      }
+      function threadAccent(id) {
+        if (!id) return [0.3, 0.4, 0.5];
+        let h = 2166136261;
+        for (const c of id) {
+          h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+        }
+        const hue = ((h >>> 0) % 360) / 60,
+          x = 1 - Math.abs((hue % 2) - 1);
+        const rgb =
+          hue < 1
+            ? [1, x, 0]
+            : hue < 2
+              ? [x, 1, 0]
+              : hue < 3
+                ? [0, 1, x]
+                : hue < 4
+                  ? [0, x, 1]
+                  : hue < 5
+                    ? [x, 0, 1]
+                    : [1, 0, x];
+        return rgb.map((v) => 0.28 + 0.55 * v);
+      }
+      let seenSent = null,
+        seenInterrupt = null,
+        rippleAt = -Infinity,
+        contractionAt = -Infinity;
+      // Tap feedback: a lightly damped spring gives the jelly bounce; the envelope drives swirl, glow and wave.
+      let tapAt = -Infinity,
+        tapDir = 1,
+        orbPressed = false;
+      const sTap = new Spring(0, 260, 9),
+        sPress = new Spring(0, 320, 24);
+      function orbTapFeedback(opening) {
+        if (motionReduced()) return;
+        tapAt = performance.now();
+        tapDir = opening ? 1 : -1;
+        sTap.v += opening ? 2.2 : -1.6;
+      }
+      function tapEffect(now, calm) {
+        const age = Math.max(0, (now - tapAt) / 1000);
+        if (calm || age > 1.6) return { tap: 0, wave: [0, 0] };
+        const p = Math.min(1, age / 0.9),
+          ease = 1 - Math.pow(1 - p, 3);
+        return {
+          tap: tapDir * Math.exp(-age * 3.4) * (1 - Math.exp(-age * 28)),
+          wave:
+            age > 1
+              ? [0, 0]
+              : [
+                  tapDir > 0 ? 1 + 0.62 * ease : 1.6 - 0.58 * ease,
+                  0.42 * (1 - p) * (1 - p) * (1 - Math.exp(-age * 40)),
+                ],
+        };
+      }
+      function effectState(now) {
+        const events = S.visualEvents || {},
+          calm = motionReduced(),
+          state = visualState();
+        if (events.sent !== undefined && events.sent !== seenSent) {
+          if (seenSent !== null) rippleAt = now;
+          seenSent = events.sent;
+        }
+        if (events.interrupt !== undefined && events.interrupt !== seenInterrupt) {
+          if (seenInterrupt !== null) contractionAt = now;
+          seenInterrupt = events.interrupt;
+        }
+        const age = Math.max(0, (now - contractionAt) / 1000);
+        const tapFx = tapEffect(now, calm);
+        return {
+          time: visualMotion(now),
+          thinking: state === "thinking",
+          approval: state === "approval",
+          tap: tapFx.tap,
+          tapWave: tapFx.wave,
+          ripple: calm ? 0 : Math.max(0, 1 - (now - rippleAt) / 850),
+          contraction: calm ? 0 : Math.max(0, 1 - age / 0.38) * Math.exp(-age * 5),
+          trail: calm ? 0 : ["transcribing", "sending", "processing"].includes(state) ? 1 : 0,
+        };
+      }
+
+      function frame(now) {
+        const dt = Math.min(0.05, (now - lastT) / 1000);
+        lastT = now;
+        const state = visualState(),
+          p = PAL[state] || PAL.off,
+          fx = effectState(now),
+          calm = motionReduced();
+        sA.t = p.a;
+        sB.t = p.b;
+        sC.t = p.c;
+        sGlow.t = p.glow;
+        const micSide = state === "hearing" || state === "dictating";
+        liveBands = micSide
+          ? gainedBands("mic", S.micBands, dt)
+          : playbackActive()
+            ? gainedBands("out", S.outBands, dt)
+            : liveBands.map((v) => v * Math.exp(-dt * 6));
+        const audio = micSide
+          ? gained("mic", S.mic, dt)
+          : playbackActive()
+            ? gained("out", S.out, dt)
+            : state === "reading"
+              ? 0.18 + 0.12 * Math.sin(now / 260)
+              : 0;
+        audioS += (audio - audioS) * (1 - Math.exp(-dt * (audio > audioS ? 20 : 6)));
+        sLevel.t = audioS;
+        sLevel.k = audioS > sLevel.x ? 170 : 70;
+        sLevel.d = audioS > sLevel.x ? 26 : 17;
+        sBusy.t = fx.trail;
+        sOff.t =
+          S.voiceOn ||
+          playbackActive() ||
+          ["thinking", "approval", "input", "dictating", "processing", "done", "failed"].includes(
+            state,
+          )
+            ? 0
+            : 1;
+        sAppear.t = S.visible || hovering || expanded || barMode ? 1 : 0;
+        if (state !== lastState) {
+          sScale.v +=
+            state === "hearing" || state === "speaking" || state === "dictating"
+              ? 0.8
+              : state === "done"
+                ? 1.3
+                : state === "error" || state === "failed"
+                  ? -0.7
+                  : 0.45;
+          lastState = state;
+        }
+        const idle = ["ready", "off", "stopped"].includes(state);
+        const breathe = calm
+          ? 1
+          : idle
+            ? 1 + 0.012 * Math.sin(now / 2100) + 0.004 * Math.sin(now / 910)
+            : 1 + 0.018 * Math.sin(now / 1700) + 0.006 * Math.sin(now / 730);
+        sScale.t = breathe * (1 + 0.3 * sLevel.x);
+        const talking = ["hearing", "dictating"].includes(state) || playbackActive();
+        const groups = talking ? bandGroups(liveBands) : [0, 0, 0, 0];
+        for (let k = 0; k < 4; k++) {
+          const g = Math.min(1, groups[k] * 1.6);
+          quad[k] += (g - quad[k]) * (1 - Math.exp(-dt * (g > quad[k] ? 9 : 3.5)));
+        }
+        const busyNow = state === "transcribing" || state === "sending" || state === "processing";
+        if (!calm)
+          flow +=
+            dt *
+            ((idle ? 0.32 : state === "thinking" ? 0.85 : 0.5) +
+              2.0 * sLevel.x +
+              (busyNow ? 0.3 : 0) +
+              2.2 * Math.abs(fx.tap));
+        sPart.t = talking
+          ? 0.55 + 0.45 * Math.min(1, sLevel.x * 1.5)
+          : busyNow
+            ? 0.4
+            : S.visible
+              ? 0.18
+              : 0;
+        if (calm) {
+          sScale.x = sScale.t = 1;
+          sScale.v = 0;
+          sAppear.x = sAppear.t;
+          sAppear.v = 0;
+          sTap.x = sTap.v = 0;
+          sPress.x = sPress.v = 0;
+        }
+        sPress.t = orbPressed && !calm ? 1 : 0;
+        const tapBounce = calm ? 0 : sTap.step(dt),
+          press = calm ? 0 : Math.max(0, sPress.step(dt));
+        const lvl = sLevel.step(dt),
+          scale =
+            sScale.step(dt) * (1 - 0.18 * fx.contraction) * (1 + tapBounce) * (1 - 0.06 * press),
+          glow = sGlow.step(dt),
+          b = sBusy.step(dt),
+          off = sOff.step(dt);
+        const appear = sAppear.step(dt);
+        const A = sA.step(dt),
+          B = sB.step(dt),
+          C = sC.step(dt);
+        if (!calm) spin += dt * (S.agent?.producing ? 2.1 : 0.7);
+        gl.viewport(0, 0, cv.width, cv.height);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.uniform2f(U.uRes, cv.width, cv.height);
+        gl.uniform2f(U.uCenter, CX * dpr, (H - CY) * dpr);
+        gl.uniform1f(U.uR, R * dpr * scale * (0.35 + 0.65 * Math.max(0, appear)));
+        gl.uniform1f(U.uAppear, Math.max(0, Math.min(1, appear)));
+        gl.uniform1f(U.uTime, fx.time);
+        gl.uniform1f(U.uThinking, fx.thinking ? 1 : 0);
+        gl.uniform1f(U.uRipple, fx.ripple);
+        gl.uniform1f(U.uTap, fx.tap);
+        gl.uniform1f(U.uPress, press);
+        gl.uniform2f(U.uTapWave, fx.tapWave[0], fx.tapWave[1]);
+        gl.uniform1f(
+          U.uApproval,
+          fx.approval ? (calm ? 0.65 : 0.5 + 0.25 * Math.sin(fx.time * 2.6)) : 0,
+        );
+        gl.uniform1f(U.uIdle, ["ready", "off", "stopped"].includes(state) ? 1 : 0);
+        gl.uniform1f(U.uContrast, S.highContrast ? 1 : 0);
+        gl.uniform3fv(U.uThread, threadAccent(S.thread));
+        gl.uniform1f(U.uLevel, Math.max(0, lvl));
+        gl.uniform4f(U.uBands, quad[0], quad[1], quad[2], quad[3]);
+        gl.uniform1f(U.uFlow, calm ? 0 : flow);
+        gl.uniform1f(U.uParticles, Math.max(0, sPart.step(dt)));
+        gl.uniform1f(U.uGlow, glow);
+        gl.uniform1f(U.uBusy, calm || state === "thinking" ? 0 : b);
+        gl.uniform1f(U.uSpin, calm ? 0 : spin);
+        gl.uniform1f(U.uArc, 1.4);
+        gl.uniform1f(U.uOff, off);
+        gl.uniform3fv(U.uA, A);
+        gl.uniform3fv(U.uB, B);
+        gl.uniform3fv(U.uC, C);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        tickBubble(dt);
+        drawWave(dt, C);
+        drawParticles(dt, B, C, appear);
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+
+      // ---------- actual speech spectrum, shared by orb and toolbar ----------
+      const wave = document.getElementById("wave"),
+        wctx = wave.getContext("2d");
+      wave.width = 52 * dpr;
+      wave.height = 24 * dpr;
+      const orbWave = document.getElementById("orbWave"),
+        octx = orbWave.getContext("2d");
+      orbWave.width = 96 * dpr;
+      orbWave.height = 18 * dpr;
+      const BARS = 11,
+        SLOTS = 23,
+        slotS = Array.from({ length: SLOTS }, () => new Spring(0, 260, 22));
+      function spectrumAt(u) {
+        const x = u * (BARS - 1),
+          i = Math.floor(x),
+          f = x - i;
+        return (
+          liveBands[Math.min(i, BARS - 1)] * (1 - f) + liveBands[Math.min(i + 1, BARS - 1)] * f
+        );
+      }
+      function drawWave(dt, C) {
+        const state = visualState(),
+          busy = state === "processing" || state === "transcribing" || state === "sending";
+        const canvas = barMode ? wave : orbWave,
+          ctx = barMode ? wctx : octx;
+        const Wc = canvas.width,
+          Hc = canvas.height,
+          mid = Hc / 2,
+          t = visualMotion(performance.now());
+        ctx.clearRect(0, 0, Wc, Hc);
+        const rgb = C.map((v) => Math.round(Math.min(1, v) * 255)).join(",");
+        const gap = Wc / SLOTS,
+          bw = Math.max(1.2 * dpr, gap * 0.34);
+        for (let i = 0; i < SLOTS; i++) {
+          const u = i / (SLOTS - 1); // low frequencies in the centre, mirrored outward
+          const freq = Math.abs(u - 0.5) * 2;
+          let target = spectrumAt(freq) * (1 - 0.35 * freq);
+          if (busy) target = 0.16 + 0.1 * Math.sin(t * 4 - i * 0.5);
+          slotS[i].t = Math.max(0, Math.min(1, target));
+          const v = Math.max(0, slotS[i].step(dt));
+          const h = Math.max(1.4 * dpr, v * Hc * 0.92);
+          const x = i * gap + (gap - bw) / 2;
+          const tint = barMode ? [0.4 + 0.34 * u, 0.88 - 0.27 * u, 0.98] : C;
+          ctx.fillStyle = `rgba(${tint.map((v) => Math.round(Math.min(1, v) * 255)).join(",")},${(S.highContrast ? 0.85 : 0.22 + 0.68 * Math.min(1, v * 1.4)) * (1 - 0.45 * freq)})`;
+          ctx.beginPath();
+          ctx.roundRect(x, mid - h / 2, bw, h, bw / 2);
+          ctx.fill();
+        }
+      }
+
+      // ---------- particles: tiny motes flowing around the orb in a smooth swirling field ----------
+      const parts = document.getElementById("parts"),
+        pctx = parts.getContext("2d");
+      parts.width = 180 * dpr;
+      parts.height = 150 * dpr;
+      const MOTES = Array.from({ length: 46 }, (_, i) => ({
+        a: Math.random() * Math.PI * 2,
+        r: 1.15 + Math.random() * 0.8,
+        s: 0.25 + Math.random() * 0.45,
+        dir: Math.random() < 0.5 ? -1 : 1,
+        size: 0.35 + Math.random() * 0.75,
+        seed: Math.random() * 100,
+      }));
+      let partFade = 0;
+      function drawParticles(dt, B, C, appear) {
+        if (barMode || motionReduced()) {
+          pctx.clearRect(0, 0, parts.width, parts.height);
+          return;
+        }
+        const state = visualState(),
+          talking = ["hearing", "dictating"].includes(state) || playbackActive(),
+          thinking = state === "thinking";
+        partFade +=
+          ((S.visible ? (talking || thinking ? 1 : 0.55) : 0) - partFade) * (1 - Math.exp(-dt * 3));
+        pctx.clearRect(0, 0, parts.width, parts.height);
+        if (partFade < 0.01) return;
+        const cx = CX * dpr,
+          cy = CY * dpr,
+          R0 = R * dpr,
+          lvl = Math.max(0, sLevel.x),
+          t = performance.now() / 1000;
+        const speed = thinking ? 0.9 : 0.55 + 1.8 * lvl;
+        pctx.globalCompositeOperation = "lighter";
+        for (const m of MOTES) {
+          // swirl: angular drift plus a smooth radial wander from layered sines (a cheap curl-like flow)
+          m.a += dt * (thinking ? 1 : m.dir) * m.s * speed;
+          const life = (t * 0.11 + m.seed * 0.09) % 1;
+          const wander =
+            0.16 * Math.sin(t * 0.7 * m.s + m.seed) + 0.09 * Math.sin(t * 1.3 + m.seed * 1.7);
+          const radius = (thinking ? 1.1 + 0.9 * (1 - life) : m.r + wander + 0.25 * lvl) * R0;
+          const x = cx + Math.cos(m.a) * radius,
+            y = cy + Math.sin(m.a) * radius * 0.92;
+          const twinkle = 0.55 + 0.45 * Math.sin(t * 2.1 * m.s + m.seed);
+          const alpha =
+            partFade *
+            appear *
+            (thinking
+              ? (0.28 + 0.12 * twinkle) * Math.pow(Math.sin(Math.PI * life), 0.8)
+              : twinkle * (0.1 + 0.22 * lvl) * (1.25 - (m.r - 1.15)));
+          const col = m.seed % 1 > 0.5 ? C : B;
+          const rgb = col.map((v) => Math.round(Math.min(1, v) * 255)).join(",");
+          if (thinking) {
+            pctx.shadowColor = `rgba(${rgb},${alpha * 0.65})`;
+            pctx.shadowBlur = 3.5 * dpr;
+            pctx.strokeStyle = `rgba(${rgb},${alpha * 0.3})`;
+            pctx.lineWidth = 0.65 * dpr;
+            const tail = m.a - 0.1;
+            pctx.beginPath();
+            pctx.moveTo(
+              cx + Math.cos(tail) * (radius + 2 * dpr),
+              cy + Math.sin(tail) * (radius + 2 * dpr) * 0.92,
+            );
+            pctx.lineTo(x, y);
+            pctx.stroke();
+          }
+          pctx.fillStyle = `rgba(${rgb},${Math.max(0, alpha)})`;
+          pctx.beginPath();
+          pctx.arc(x, y, m.size * dpr * (thinking ? 1.35 : 1 + 0.4 * lvl), 0, Math.PI * 2);
+          pctx.fill();
+          pctx.shadowBlur = 0;
+        }
+        pctx.globalCompositeOperation = "source-over";
+      }
+
+      // ---------- bubble: typewriter reveal at speaking pace ----------
+      const bubbleEl = document.getElementById("bubble"),
+        btext = document.getElementById("btext"),
+        whoEl = document.getElementById("who");
+      const bubbleText = document.getElementById("bubbleText"),
+        bmeasure = document.getElementById("bmeasure");
+      let bid = null,
+        bwords = [],
+        shown = 0,
+        rendered = -1,
+        freshFrom = 0;
+      let bubbleNodes = [];
+      let measuredBubbleText = null,
+        reservedBubbleHeight = 0,
+        followBubble = true,
+        wasUnfinished = false;
+      function updateBubbleMask() {
+        btext.classList.toggle("scrolled", btext.scrollTop > 1);
+      }
+      btext.addEventListener("scroll", () => {
+        followBubble = btext.scrollHeight - btext.clientHeight - btext.scrollTop < 8;
+        updateBubbleMask();
+      });
+      function reserveBubbleText(tokens) {
+        // The full payload reserves its final layout before individual words appear.
+        const fragment = document.createDocumentFragment();
+        tokens.forEach((token, i) => {
+          const node = document.createElement("span");
+          node.className = "word";
+          node.textContent = token.word;
+          fragment.append(node, document.createTextNode(i < tokens.length - 1 ? token.gap : ""));
+        });
+        bmeasure.replaceChildren(fragment);
+        reservedBubbleHeight = Math.max(reservedBubbleHeight, Math.min(113, bmeasure.offsetHeight));
+        bubbleText.style.height = reservedBubbleHeight + "px";
+      }
+      function paintBubble(tokens) {
+        // Reuse stable words. A rolling audio window may drop words from the start.
+        if (bubbleNodes.length && tokens.length && bubbleNodes[0].word !== tokens[0].word) {
+          for (let shift = 1; shift < bubbleNodes.length; shift++) {
+            const overlap = bubbleNodes.length - shift;
+            if (overlap < 2 || overlap > tokens.length) continue;
+            if (bubbleNodes.slice(shift).every((item, i) => item.word === tokens[i].word)) {
+              for (const item of bubbleNodes.splice(0, shift)) {
+                item.node.remove();
+                item.gap.remove();
+              }
+              break;
+            }
+          }
+        }
+        let prefix = 0,
+          suffix = 0;
+        while (
+          prefix < Math.min(bubbleNodes.length, tokens.length) &&
+          bubbleNodes[prefix].word === tokens[prefix].word
+        )
+          prefix++;
+        while (
+          suffix < Math.min(bubbleNodes.length, tokens.length) - prefix &&
+          bubbleNodes[bubbleNodes.length - 1 - suffix].word ===
+            tokens[tokens.length - 1 - suffix].word
+        )
+          suffix++;
+        const removed = bubbleNodes.splice(prefix, bubbleNodes.length - prefix - suffix);
+        for (const item of removed) {
+          item.node.remove();
+          item.gap.remove();
+        }
+        const before = bubbleNodes[prefix]?.node || null,
+          added = [];
+        const animateFrom = Math.max(prefix, tokens.length - suffix - 16);
+        for (let i = prefix; i < tokens.length - suffix; i++) {
+          const node = document.createElement("span"),
+            gap = document.createTextNode("");
+          node.className = i >= animateFrom ? "word fresh" : "word";
+          node.textContent = tokens[i].word;
+          node.style.setProperty("--ink-delay", Math.min(180, (i - animateFrom) * 28) + "ms");
+          node.addEventListener("animationend", () => node.classList.remove("fresh"), {
+            once: true,
+          });
+          btext.insertBefore(node, before);
+          btext.insertBefore(gap, before);
+          added.push({ word: tokens[i].word, node, gap });
+        }
+        bubbleNodes.splice(prefix, 0, ...added);
+        bubbleNodes.forEach((item, i) => {
+          const gap = i < tokens.length - 1 ? tokens[i].gap : "";
+          if (item.gap.textContent !== gap) item.gap.textContent = gap;
+        });
+        // Layout offsets exclude a new word's animated translateY; scrollHeight does not.
+        const last = bubbleNodes[bubbleNodes.length - 1]?.node;
+        if (followBubble)
+          btext.scrollTop = last
+            ? Math.max(0, last.offsetTop + last.offsetHeight - btext.clientHeight)
+            : 0;
+        updateBubbleMask();
+      }
+      function tickBubble(dt) {
+        const B = S.bubble;
+        if (!B) {
+          bubbleEl.classList.remove("show");
+          return;
+        }
+        if (B.id !== bid) {
+          bid = B.id;
+          shown = 0;
+          rendered = -1;
+          freshFrom = 0;
+          bubbleNodes = [];
+          btext.replaceChildren();
+          measuredBubbleText = null;
+          reservedBubbleHeight = 0;
+          followBubble = true;
+          wasUnfinished = !!(B.live || B.processing);
+          bubbleEl.classList.remove("settled");
+          bubbleEl.classList.toggle("you", B.who === "you");
+        }
+        const unfinished = !!(B.live || B.processing);
+        if (wasUnfinished && !unfinished) bubbleEl.classList.add("settled");
+        wasUnfinished = unfinished;
+        setText(
+          whoEl,
+          B.who === "you"
+            ? B.live
+              ? "You · live"
+              : B.processing
+                ? "You · transcribing"
+                : "You"
+            : S.maeveMuted
+              ? "Maeve · muted"
+              : "Maeve",
+        );
+        const tokens = [...B.text.matchAll(/(\S+)(\s*)/g)].map((m) => ({ word: m[1], gap: m[2] }));
+        if (measuredBubbleText !== B.text) {
+          reserveBubbleText(tokens);
+          measuredBubbleText = B.text;
+        }
+        const words = tokens.map((token) => token.word);
+        if (words.length < bwords.length) shown = Math.min(shown, words.length);
+        bwords = words;
+        if (B.who === "you") shown = words.length;
+        else shown = Math.min(words.length, shown + dt * 3.0); // keep the same pace at playback completion
+        const n = Math.floor(shown);
+        const visibleTokens = tokens.slice(0, n);
+        if (
+          n !== rendered ||
+          visibleTokens.some(
+            (token, i) =>
+              token.word !== bubbleNodes[i]?.word ||
+              (i < n - 1 && token.gap !== bubbleNodes[i]?.gap.textContent),
+          )
+        ) {
+          paintBubble(visibleTokens);
+          rendered = n;
+        }
+        bubbleEl.classList.add("show");
+      }
+
+      // ---------- DOM ----------
+      const cap = document.getElementById("cap"),
+        card = document.getElementById("card"),
+        badge = document.getElementById("badge");
+      const muteMic = document.getElementById("muteMic"),
+        muteMaeve = document.getElementById("muteMaeve");
+      const barMic = document.getElementById("barMic"),
+        barMaeve = document.getElementById("barMaeve");
+      const reviewEl = document.getElementById("review"),
+        reviewText = document.getElementById("reviewText");
+      let reviewId = null,
+        reviewEditVersion = 0;
+      let settingsGeneration = 0,
+        settingsPending = 0,
+        settingsWrites = Promise.resolve();
+      let hoverGeneration = 0,
+        hoverPending = 0,
+        hoverWrites = Promise.resolve();
+      let cardViewport = [320, 360],
+        cardClosing = false,
+        finishCardExit = null,
+        handledNativeClose = 0,
+        lastHitRegions = null;
+      function setText(el, value) {
+        if (el.textContent !== value) el.textContent = value;
+      }
+      function render() {
+        if (!settingsPending) cardViewport = S.viewportTarget || [320, S.dock ? 270 : 360];
+        if (typeof S.hovered === "boolean" && !hoverPending) {
+          hovering = S.hovered;
+          document.body.classList.toggle("hover", hovering);
+        }
+        document.body.classList.toggle("high-contrast", !!S.highContrast);
+        document.body.classList.toggle("reduced-motion", motionReduced());
+        document.getElementById("contrastSel").checked = !!S.highContrast;
+        document.getElementById("motionSel").checked = !!S.reducedMotion;
+        document.getElementById("motionNote").textContent = systemMotion.matches
+          ? "Windows reduced motion is active. Colours and audio levels remain visible."
+          : "Keeps state colours and audio levels. Windows reduced-motion settings are always respected.";
+        const progress = S.playback,
+          track = document.getElementById("playbackTrack"),
+          fill = document.getElementById("playbackFill");
+        track.classList.toggle("active", !!progress?.active);
+        track.classList.toggle("indeterminate", !!progress?.active && progress.fraction == null);
+        track.setAttribute("aria-hidden", String(!progress?.active));
+        if (progress?.fraction != null) {
+          const n = Math.max(0, Math.min(1, progress.fraction));
+          fill.style.transform = `scaleX(${n})`;
+          track.setAttribute("aria-valuenow", String(Math.round(n * 100)));
+          track.setAttribute("aria-valuetext", `${Math.round(n * 100)}% played`);
+        } else {
+          fill.style.transform = "";
+          track.removeAttribute("aria-valuenow");
+          track.setAttribute("aria-valuetext", "Reply still being generated");
+        }
+        document.body.classList.toggle(
+          "audio-active",
+          ["hearing", "dictating"].includes(S.state) || playbackActive(),
+        );
+        if (S.review && !settingsPending) applyExpanded(false);
+        else if (!settingsPending && S.expanded !== undefined && expanded !== !!S.expanded)
+          applyExpanded(!!S.expanded);
+        document.body.classList.toggle("reviewing", !!S.review);
+        reviewEl.classList.toggle("show", !!S.review);
+        if (S.review && S.review.id !== reviewId) {
+          reviewId = S.review.id;
+          reviewEditVersion = S.review.editVersion || 0;
+          reviewText.value = S.review.text;
+          document.getElementById("reviewTitle").textContent =
+            "To: " + (S.review.title || S.threadTitle || "selected thread");
+          setTimeout(() => {
+            if (S.review) {
+              reviewText.focus();
+              reviewText.setSelectionRange(reviewText.value.length, reviewText.value.length);
+            }
+          }, 80);
+        } else if (!S.review) reviewId = null;
+        if (S.review) {
+          document.getElementById("reviewSend").disabled =
+            !!S.review.sending || !reviewText.value.trim();
+          document.getElementById("reviewSend").textContent = S.review.sending
+            ? "Sending…"
+            : S.review.error
+              ? "Retry ↵"
+              : "Send ↵";
+          document
+            .getElementById("reviewCancel")
+            .setAttribute("aria-disabled", String(!!S.review.sending));
+          reviewText.readOnly = !!S.review.sending;
+          setText(
+            document.getElementById("reviewTitle"),
+            S.review.error
+              ? "Send failed · your text is kept"
+              : "To: " + (S.review.title || S.threadTitle || "selected thread"),
+          );
+          document.getElementById("reviewTitle").title = S.review.error || S.review.title || "";
+        }
+        document.getElementById("delivery").value = S.delivery || "immediate";
+        const vs = visualState();
+        document.body.dataset.state = vs;
+        const label = ["approval", "input", "thinking"].includes(vs)
+          ? LABEL[vs]
+          : S.text || LABEL[S.state] || "";
+        setText(cap, label);
+        cap.classList.toggle(
+          "show",
+          !!label && S.visible && !S.bubble && (!hovering || vs === "thinking") && !expanded,
+        );
+        muteMic.classList.toggle("muted", S.micMuted);
+        muteMic.title = S.micMuted ? "Resume T3 voice input" : "Pause T3 voice input";
+        muteMaeve.classList.toggle("muted", S.maeveMuted);
+        muteMaeve.title = S.maeveMuted ? "Unmute Maeve" : "Mute Maeve";
+        barMic.classList.toggle("muted", S.micMuted);
+        barMic.title = muteMic.title;
+        barMaeve.classList.toggle("muted", S.maeveMuted);
+        barMaeve.title = muteMaeve.title;
+        for (const [el, on] of [
+          [muteMic, S.micMuted],
+          [barMic, S.micMuted],
+          [muteMaeve, S.maeveMuted],
+          [barMaeve, S.maeveMuted],
+        ]) {
+          el.setAttribute("aria-pressed", String(!!on));
+          el.setAttribute("aria-label", el.title);
+        }
+        if (!!S.dock !== barMode) layout(!!S.dock);
+        syncCardViewport();
+        document.getElementById("mDock").classList.toggle("on", !!S.dock);
+        badge.textContent =
+          S.micMuted && S.maeveMuted
+            ? "mic · voice off"
+            : S.micMuted
+              ? "mic off"
+              : S.maeveMuted
+                ? "voice off"
+                : "";
+        badge.classList.toggle("show", !!badge.textContent && S.visible);
+        setText(document.getElementById("threadName"), S.threadTitle || "Choose a thread");
+        document.getElementById("threadBtn").title =
+          (S.followActive ? "Following T3 · " : "Pinned · ") + (S.threadTitle || "Choose a thread");
+        document.getElementById("barOrb").title = document.getElementById("threadBtn").title;
+        document
+          .getElementById("barOrb")
+          .setAttribute(
+            "aria-label",
+            (label ? label + "; " : "") + document.getElementById("threadBtn").title,
+          );
+        cv.setAttribute("aria-label", "Open settings" + (label ? "; " + label : ""));
+        document.getElementById("mFollow").classList.toggle("on", !!S.followActive);
+        const pv = document.getElementById("pVoice");
+        pv.textContent = S.voiceOn ? "Voice on" : "Voice off";
+        pv.classList.toggle("on", S.voiceOn);
+        setText(document.getElementById("pMode"), "Hold to talk");
+        const dictKey =
+          { MouseButton5: "Mouse Forward", MouseButton4: "Mouse Back" }[S.dictKey] ||
+          S.dictKey ||
+          "your dictation key";
+        document.getElementById("pMode").title =
+          "Hold " + dictKey + " to dictate; release to finish";
+        setText(document.getElementById("detail"), S.detail || "");
+        document.getElementById("detail").title = S.detail || "";
+        document.getElementById("mCleanup").classList.toggle("on", S.cleanup);
+        document.getElementById("mStartup").classList.toggle("on", S.startup);
+        document.getElementById("mFx").classList.toggle("on", S.voiceFx !== false);
+        const list = document.getElementById("list");
+        const threadKeys = JSON.stringify(S.threads);
+        if (list.dataset.n !== threadKeys) {
+          list.innerHTML = "";
+          list.dataset.n = threadKeys;
+          for (const t of S.threads) {
+            const d = document.createElement("div");
+            d.textContent = t.title || "(untitled)";
+            d.title = t.id;
+            d.onclick = (e) => {
+              e.stopPropagation();
+              list.classList.remove("open");
+              panelExtra();
+              api("select", t.id);
+            };
+            list.appendChild(d);
+          }
+        }
+        syncHitRegions();
+      }
+      const Q = new URLSearchParams(location.search),
+        DEMO = Q.get("demo");
+      function api(name, ...args) {
+        if (!DEMO && window.pywebview) return pywebview.api[name](...args);
+      }
+      function acceptSnapshot(
+        next,
+        generation,
+        wasPending,
+        appearanceVersion = appearanceGeneration,
+        appearanceWasPending = false,
+        hoverVersion = hoverGeneration,
+        hoverWasPending = false,
+      ) {
+        if (hoverWasPending || hoverPending || hoverVersion !== hoverGeneration)
+          next.hovered = hovering;
+        if (
+          appearanceWasPending ||
+          appearancePending ||
+          appearanceVersion !== appearanceGeneration
+        ) {
+          next.highContrast = S.highContrast;
+          next.reducedMotion = S.reducedMotion;
+        }
+        if (
+          next.settingsCloseRequest &&
+          next.settingsCloseRequest !== handledNativeClose &&
+          wantExpanded &&
+          generation === settingsGeneration &&
+          !wasPending &&
+          !settingsPending
+        ) {
+          handledNativeClose = next.settingsCloseRequest;
+          setExpanded(false);
+        }
+        // A backend snapshot can close settings; only an explicit local intent may open it.
+        if (!wantExpanded) next.expanded = false;
+        // A poll already in flight must not undo a newer click or a write it raced with.
+        if (wasPending || settingsPending || generation !== settingsGeneration) {
+          next.expanded = expanded;
+          next.viewportTarget = cardViewport;
+          if (wantExpanded) next.review = null;
+        }
+        S = next;
+        render();
+      }
+      async function poll() {
+        const generation = settingsGeneration,
+          wasPending = settingsPending > 0;
+        const appearanceVersion = appearanceGeneration,
+          appearanceWasPending = appearancePending > 0;
+        const hoverVersion = hoverGeneration,
+          hoverWasPending = hoverPending > 0;
+        try {
+          acceptSnapshot(
+            await pywebview.api.poll(choosingDelivery, currentHitRegions()),
+            generation,
+            wasPending,
+            appearanceVersion,
+            appearanceWasPending,
+            hoverVersion,
+            hoverWasPending,
+          );
+        } catch (e) {}
+        setTimeout(poll, 50);
+      }
+      if (DEMO) {
+        const seq = [
+          "ready",
+          "hearing",
+          "transcribing",
+          "sending",
+          "waiting",
+          "speaking",
+          "reading",
+          "off",
+          "error",
+          "dictating",
+          "processing",
+          "done",
+          "failed",
+        ];
+        let i = seq.indexOf(DEMO);
+        if (i < 0) i = 0;
+        S = Object.assign(S, {
+          state: seq[i],
+          voiceOn: true,
+          thread: "x",
+          threadTitle: "Choose a Fast Local Live TTS Model",
+          visible: true,
+          threads: [
+            { id: "x", title: "Choose a Fast Local Live TTS Model" },
+            { id: "y", title: "P13 repo cleanup" },
+          ],
+          detail: "Sent 9 words · ASR 280 ms · total 310 ms · voice 40 ms",
+          startup: true,
+          micMuted: !!Q.get("micmuted"),
+          maeveMuted: !!Q.get("maevemuted"),
+          dock: !!Q.get("dock"),
+          hidePill: true,
+        });
+        if (Q.get("bubble"))
+          S.bubble = {
+            id: 1,
+            who: Q.get("bubble"),
+            new: 0,
+            text:
+              Q.get("bubble") === "you"
+                ? "Can you check why the deploy failed on the Windows runner?"
+                : "I found the cause. The Windows runner pins Node 20, but the lockfile was regenerated with Node 24, so npm ci rejects it. I will pin the runner to Node 24 and rerun the pipeline.",
+          };
+        if (Q.get("hover")) {
+          hovering = true;
+          document.body.classList.add("hover");
+        }
+        if (!Q.has("static"))
+          setInterval(() => {
+            const t = Date.now();
+            S.mic = 0.12 + 0.22 * Math.abs(Math.sin(t / 95)) * (0.5 + 0.5 * Math.sin(t / 700));
+            S.out = 0.1 + 0.22 * Math.abs(Math.sin(t / 70)) * (0.5 + 0.5 * Math.sin(t / 500));
+            render();
+          }, 50);
+        if (!seq.includes(DEMO))
+          setInterval(() => {
+            i = (i + 1) % seq.length;
+            S.state = seq[i];
+            S.voiceOn = S.state !== "off";
+          }, 1800);
+        if (Q.get("card")) {
+          expanded = true;
+          card.classList.add("open");
+        }
+        if (Q.get("review")) {
+          S.state = "reviewing";
+          S.review = {
+            id: 1,
+            text: "Please check why the Windows build failed and fix the cause.",
+            title: S.threadTitle,
+          };
+        }
+      } else {
+        window.addEventListener("pywebviewready", poll);
+      }
+      let wantExpanded = expanded; // the latest requested state; the card opens only after the window grows
+      function currentHitRegions() {
+        const regions = [];
+        for (const id of ["orbwrap", "bar", "card", "bubble", "review"]) {
+          const el = document.getElementById(id),
+            style = getComputedStyle(el);
+          if (style.display === "none" || style.visibility === "hidden") continue;
+          if (id === "card" && !el.classList.contains("open") && !el.classList.contains("closing"))
+            continue;
+          if (id === "bubble" && !el.classList.contains("show") && Number(style.opacity) < 0.01)
+            continue;
+          const r = el.getBoundingClientRect();
+          if (r.width && r.height)
+            regions.push({ id, x: r.left, y: r.top, width: r.width, height: r.height });
+        }
+        return regions;
+      }
+      function syncHitRegions() {
+        if (DEMO || !window.pywebview) return;
+        const regions = currentHitRegions(),
+          key = JSON.stringify(regions);
+        if (key === lastHitRegions) return;
+        lastHitRegions = key;
+        Promise.resolve(api("set_hit_regions", regions)).catch(() => {
+          lastHitRegions = null;
+        });
+      }
+      function cardViewportReady() {
+        return innerWidth >= cardViewport[0] - 1.5 && innerHeight >= cardViewport[1] - 1.5;
+      }
+      function syncCardViewport() {
+        card.classList.toggle("open", expanded && cardViewportReady());
+        syncHitRegions();
+      }
+      window.addEventListener("resize", syncCardViewport);
+      function closeCardPanels() {
+        devicesEl?.classList.remove("open");
+        document.getElementById("appearance").classList.remove("open");
+        choosingDelivery = false;
+        document.getElementById("list").classList.remove("open");
+        document.getElementById("menu").classList.remove("open");
+      }
+      function applyExpanded(v) {
+        if (finishCardExit) finishCardExit(v);
+        expanded = v;
+        wantExpanded = v;
+        syncCardViewport();
+        if (!v) closeCardPanels();
+      }
+      function beginCardExit() {
+        const visible =
+          card.classList.contains("open") && Number(getComputedStyle(card).opacity) > 0.01;
+        expanded = false;
+        wantExpanded = false;
+        if (!visible || motionReduced()) {
+          applyExpanded(false);
+          return { animated: false, done: Promise.resolve() };
+        }
+        cardClosing = true;
+        card.classList.add("closing");
+        card.classList.remove("open");
+        const done = new Promise((resolve) => {
+          let timer;
+          const finish = (reopen = false) => {
+            clearTimeout(timer);
+            card.removeEventListener("transitionend", ended);
+            finishCardExit = null;
+            cardClosing = false;
+            card.classList.remove("closing");
+            expanded = reopen;
+            syncCardViewport();
+            if (!reopen) closeCardPanels();
+            resolve();
+          };
+          const ended = (e) => {
+            if (e.target === card && e.propertyName === "opacity") finish(false);
+          };
+          finishCardExit = finish;
+          card.addEventListener("transitionend", ended);
+          timer = setTimeout(() => finish(false), 180);
+        });
+        return { animated: true, done };
+      }
+      function waitForCardViewport(generation) {
+        return new Promise((resolve) => {
+          const deadline = performance.now() + 2500;
+          const check = () => {
+            if (performance.now() > deadline) return resolve(false);
+            if (generation !== settingsGeneration || !wantExpanded) return resolve(false);
+            if (cardViewportReady()) return resolve(true);
+            requestAnimationFrame(check);
+          };
+          check();
+        });
+      }
+      function setExpanded(v) {
+        if ((v && S.review?.sending) || wantExpanded === v) return;
+        wantExpanded = v;
+        if (v && finishCardExit) finishCardExit(true);
+        if (v) {
+          S.review = null;
+          reviewEl.classList.remove("show");
+          cardViewport = [
+            Math.min(320, screen.availWidth),
+            Math.min(S.dock ? 270 : 360, screen.availHeight),
+          ];
+        }
+        ++settingsGeneration;
+        ++settingsPending;
+        const generation = settingsGeneration,
+          bridge = api;
+        S.expanded = v;
+        const exit = v ? { animated: false, done: Promise.resolve() } : beginCardExit();
+        settingsWrites = settingsWrites
+          .then(async () => {
+            await exit.done;
+            if (!v && exit.animated && generation !== settingsGeneration) return null;
+            return bridge("set_expanded", v);
+          })
+          .then((ack) => {
+            if (generation !== settingsGeneration || !wantExpanded) return false;
+            if (ack && ack.expanded === false) {
+              wantExpanded = false;
+              return false;
+            }
+            if (ack?.size) cardViewport = ack.size;
+            return v ? waitForCardViewport(generation) : false;
+          })
+          .then(async (ready) => {
+            if (generation !== settingsGeneration) return;
+            if (ready && wantExpanded) {
+              S.viewportTarget = cardViewport;
+              applyExpanded(true);
+            } else if (v && wantExpanded) {
+              S.expanded = false;
+              applyExpanded(false);
+              await bridge("set_expanded", false);
+            }
+          })
+          .catch(() => {
+            if (generation === settingsGeneration) applyExpanded(false);
+          })
+          .finally(() => {
+            --settingsPending;
+          });
+      }
+      function toggleSettings() {
+        const opening = !wantExpanded;
+        orbTapFeedback(opening);
+        setExpanded(opening);
+      }
+      function panelExtra() {
+        api("set_panel_extra", document.getElementById("list").classList.contains("open"));
+      }
+      function setHover(v) {
+        if (hovering === v) return;
+        hovering = v;
+        S.hovered = v;
+        document.body.classList.toggle("hover", v);
+        ++hoverGeneration;
+        ++hoverPending;
+        const bridge = api;
+        hoverWrites = hoverWrites
+          .then(() => bridge("set_hover", v))
+          .catch(() => {})
+          .finally(() => {
+            --hoverPending;
+          });
+        render();
+      }
+      function pointerOverControls(x, y) {
+        const rect = cv.getBoundingClientRect();
+        if (Math.hypot(x - rect.left - CX, y - rect.top - CY) <= R * 1.6) return true;
+        for (const id of barMode ? ["bar"] : ["muteMic", "muteMaeve", "toBar"]) {
+          const r = document.getElementById(id).getBoundingClientRect();
+          if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+        }
+        return false;
+      }
+      document.addEventListener("pointermove", (e) =>
+        setHover(pointerOverControls(e.clientX, e.clientY)),
+      );
+      let choosingDelivery = false;
+      document.getElementById("delivery").addEventListener("pointerdown", () => {
+        choosingDelivery = true;
+      });
+      document.getElementById("delivery").addEventListener("blur", () => {
+        choosingDelivery = false;
+      });
+      // The engine closes the card on a click elsewhere or a sustained pointer exit; focus changes
+      // inside WebView2 fire spurious mouseleave events, so the page never closes it on its own here.
+      function dismissAfterLeave() {
+        setHover(false);
+      }
+      document.body.addEventListener("mouseleave", dismissAfterLeave);
+      let dragStart = null,
+        gesturePointer = null,
+        gestureId = 0,
+        draggingOrb = false,
+        suppressOrbClick = false;
+      let pendingDrag = null,
+        writingDrag = false;
+      async function pumpOrbDrag() {
+        if (writingDrag) return;
+        writingDrag = true;
+        try {
+          while (pendingDrag) {
+            const move = pendingDrag;
+            pendingDrag = null;
+            await api("drag_window", move.id, move.dx, move.dy);
+          }
+        } catch (e) {
+          pendingDrag = null;
+        } finally {
+          writingDrag = false;
+        }
+      }
+      function beginOrbGesture(e) {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        gesturePointer = e.pointerId;
+        dragStart = [e.screenX, e.screenY];
+        draggingOrb = false;
+        suppressOrbClick = false;
+        orbPressed = true;
+        gestureId = Math.max(gestureId + 1, Date.now() * 1000);
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+      }
+      function moveOrbGesture(e) {
+        if (e.pointerId !== gesturePointer || !dragStart) return;
+        const dx = e.screenX - dragStart[0],
+          dy = e.screenY - dragStart[1];
+        if (!draggingOrb && Math.hypot(dx, dy) < 6) return;
+        draggingOrb = true;
+        suppressOrbClick = true;
+        orbPressed = false;
+        pendingDrag = { id: gestureId, dx, dy };
+        pumpOrbDrag();
+      }
+      function endOrbGesture(e) {
+        if (e.pointerId !== gesturePointer) return;
+        if (draggingOrb) moveOrbGesture(e);
+        gesturePointer = null;
+        dragStart = null;
+        draggingOrb = false;
+        orbPressed = false;
+      }
+      for (const surface of [cv, wave]) {
+        surface.addEventListener("pointerdown", beginOrbGesture);
+        surface.addEventListener("pointermove", moveOrbGesture);
+        surface.addEventListener("pointerup", endOrbGesture);
+        surface.addEventListener("pointercancel", () => {
+          gesturePointer = null;
+          dragStart = null;
+          draggingOrb = false;
+          suppressOrbClick = true;
+          orbPressed = false;
+        });
+      }
+      function handleOrbClick(e) {
+        e.stopPropagation();
+        if (suppressOrbClick && e.detail !== 0) {
+          suppressOrbClick = false;
+          return;
+        }
+        suppressOrbClick = false;
+        dragStart = null;
+        toggleSettings();
+      }
+      cv.addEventListener("click", handleOrbClick);
+      function toggleDock() {
+        S.dock = !S.dock;
+        setExpanded(false);
+        setHover(false);
+        layout(!!S.dock);
+        api("toggle_dock");
+      }
+      document.getElementById("toBar").addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleDock();
+      });
+      document.getElementById("barExpand").addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleDock();
+      });
+      document.getElementById("barOrb").onclick = toggleSettings;
+      function toggleMicMute() {
+        S.micMuted = !S.micMuted;
+        render();
+        api("toggle_mic_mute");
+      }
+      function toggleMaeveMute() {
+        S.maeveMuted = !S.maeveMuted;
+        render();
+        api("toggle_maeve_mute");
+      }
+      barMic.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleMicMute();
+      });
+      barMaeve.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleMaeveMute();
+      });
+      document.getElementById("mDock").onclick = () => {
+        document.getElementById("menu").classList.remove("open");
+        toggleDock();
+      };
+      document.getElementById("mFollow").onclick = () => {
+        document.getElementById("menu").classList.remove("open");
+        panelExtra();
+        api("toggle_follow_active");
+      };
+      muteMic.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleMicMute();
+      });
+      muteMaeve.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleMaeveMute();
+      });
+      document.getElementById("threadBtn").onclick = () => {
+        document.getElementById("list").classList.toggle("open");
+        panelExtra();
+      };
+      document.getElementById("pVoice").onclick = () => api("toggle_voice");
+      document.getElementById("pStop").onclick = () => api("stop");
+      document.getElementById("fTest").onclick = () => api("test_voice");
+      document.getElementById("fQuit").onclick = () => api("quit");
+      document.getElementById("fMore").onclick = (e) => {
+        e.stopPropagation();
+        document.getElementById("menu").classList.toggle("open");
+        panelExtra();
+      };
+      function closeMenu() {
+        document.getElementById("menu").classList.remove("open");
+        panelExtra();
+      }
+      const devicesEl = document.getElementById("devices"),
+        micSel = document.getElementById("micSel"),
+        spkSel = document.getElementById("spkSel");
+      function fillSelect(sel, items, current) {
+        sel.replaceChildren(new Option("System default", ""));
+        for (const d of items) sel.add(new Option(d.label, d.name));
+        sel.value = items.some((d) => d.name === current) ? current : "";
+      }
+      async function openDevices() {
+        closeMenu();
+        document.getElementById("appearance").classList.remove("open");
+        devicesEl.classList.add("open");
+        const list = await api("audio_devices");
+        if (!list) return;
+        fillSelect(spkSel, list.outputs, list.speaker);
+        fillSelect(micSel, list.inputs, list.mic);
+      }
+      document.getElementById("mDevices").onclick = () => openDevices();
+      function openAppearance() {
+        closeMenu();
+        devicesEl.classList.remove("open");
+        document.getElementById("appearance").classList.add("open");
+      }
+      document.getElementById("mAppearance").onclick = openAppearance;
+      document.getElementById("appearanceDone").onclick = () =>
+        document.getElementById("appearance").classList.remove("open");
+      let appearanceWrites = Promise.resolve(),
+        appearancePending = 0,
+        appearanceGeneration = 0;
+      function saveAppearance() {
+        const contrast = document.getElementById("contrastSel").checked,
+          motion = document.getElementById("motionSel").checked;
+        S.highContrast = contrast;
+        S.reducedMotion = motion;
+        render();
+        ++appearancePending;
+        ++appearanceGeneration;
+        const bridge = api;
+        appearanceWrites = appearanceWrites
+          .then(() => bridge("set_appearance", contrast, motion))
+          .catch(() => {})
+          .finally(() => {
+            --appearancePending;
+          });
+      }
+      document.getElementById("contrastSel").onchange = saveAppearance;
+      document.getElementById("motionSel").onchange = saveAppearance;
+      systemMotion.addEventListener("change", render);
+      document.getElementById("devDone").onclick = () => devicesEl.classList.remove("open");
+      spkSel.addEventListener("change", () => api("set_speaker_device", spkSel.value));
+      micSel.addEventListener("change", () => api("set_mic_device", micSel.value));
+      for (const sel of [spkSel, micSel]) {
+        sel.addEventListener("pointerdown", () => {
+          choosingDelivery = true;
+        });
+        sel.addEventListener("blur", () => {
+          choosingDelivery = false;
+        });
+      }
+      document.getElementById("mCleanup").onclick = () => {
+        closeMenu();
+        api("toggle_cleanup");
+      };
+      document.getElementById("mStartup").onclick = () => {
+        closeMenu();
+        api("toggle_startup");
+      };
+      document.getElementById("mFx").onclick = () => {
+        closeMenu();
+        S.voiceFx = S.voiceFx === false;
+        render();
+        api("toggle_voice_fx");
+      };
+      document.getElementById("delivery").onchange = (e) => {
+        choosingDelivery = false;
+        S.delivery = e.target.value;
+        api("set_delivery", S.delivery);
+      };
+      function reviewTextChanged() {
+        document.getElementById("reviewSend").disabled =
+          !reviewText.value.trim() || !!S.review?.sending;
+        if (S.review && !S.review.sending) {
+          S.review.text = reviewText.value;
+          Promise.resolve(
+            api("update_review_text", S.review.id, reviewText.value, ++reviewEditVersion),
+          ).catch(() => {});
+        }
+      }
+      reviewText.addEventListener("input", reviewTextChanged);
+      function sendReview() {
+        if (!S.review || !reviewText.value.trim() || document.getElementById("reviewSend").disabled)
+          return;
+        document.getElementById("reviewSend").disabled = true;
+        api("confirm_review", S.review.id, reviewText.value);
+      }
+      document.getElementById("reviewSend").onclick = sendReview;
+      document.getElementById("reviewCancel").onclick = () => api("cancel_review");
+      document.addEventListener("pointerdown", (e) => {
+        if (
+          !e.target.closest("#menu,#fMore") &&
+          document.getElementById("menu").classList.contains("open")
+        )
+          closeMenu();
+      });
+      for (const el of document.querySelectorAll(
+        ".ctl,.bbtn,.pill,#orb,#toBar,#barOrb,#threadBtn,.foot span,#menu div,#devDone",
+      )) {
+        el.setAttribute("role", "button");
+        el.tabIndex = 0;
+        if (el.title) el.setAttribute("aria-label", el.title);
+        el.addEventListener("keydown", (e) => {
+          if ((e.key === "Enter" || e.key === " ") && !e.repeat) {
+            e.preventDefault();
+            e.stopPropagation();
+            el.click();
+          }
+        });
+      }
+      // Keep text selection and controls out of pywebview's window-drag handler.
+      document.addEventListener("mousedown", (e) => {
+        if (
+          e.target.id !== "orb" &&
+          e.target.closest('textarea,input,select,button,[role="button"],#card,#review')
+        )
+          e.stopPropagation();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (
+          S.review &&
+          !e.isComposing &&
+          (e.key === "Escape" || (e.key === "Enter" && !e.shiftKey))
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.key === "Enter") sendReview();
+          else api("cancel_review");
+          return;
+        }
+        if (e.key === "Escape") {
+          if (wantExpanded || expanded) setExpanded(false);
+          else api("stop");
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1089,6 +1089,10 @@ export const DESKTOP_EXTRA_RESOURCES = [
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
   },
+  {
+    from: "apps/desktop/prod-resources/voice",
+    to: "voice",
+  },
 ] as const;
 export const LINUX_CAPTURE_EXTRA_RESOURCES = [
   {
@@ -2419,6 +2423,59 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
   if (input.platform !== "win") {
     yield* fs.chmod(destinationPath, 0o755);
   }
+});
+
+// Voice: Maeve's speech helper (Rust, built per target like the resource monitor) and the orb page.
+export const stageVoiceResources = Effect.fn("stageVoiceResources")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+  readonly verbose: boolean;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const manifestPath = path.join(input.repoRoot, "native/maeve-tts/Cargo.toml");
+  const executableName = input.platform === "win" ? "t3-maeve-tts.exe" : "t3-maeve-tts";
+  const builtBinaries: string[] = [];
+  for (const rustTarget of resolveResourceMonitorRustTargets(input.platform, input.arch)) {
+    const spawnCommand = yield* resolveSpawnCommand("cargo", [
+      "build",
+      "--locked",
+      "--release",
+      "--manifest-path",
+      manifestPath,
+      "--target",
+      rustTarget,
+    ]);
+    yield* runCommand(
+      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+        cwd: input.repoRoot,
+        shell: spawnCommand.shell,
+      }),
+      { label: `cargo build maeve speech helper (${rustTarget})`, verbose: input.verbose },
+    );
+    builtBinaries.push(
+      path.join(input.repoRoot, "native/maeve-tts/target", rustTarget, "release", executableName),
+    );
+  }
+  const destinationDirectory = path.join(input.stageResourcesDir, "voice");
+  const destinationPath = path.join(destinationDirectory, executableName);
+  yield* fs.remove(destinationDirectory, { recursive: true, force: true }).pipe(Effect.ignore);
+  yield* fs.makeDirectory(destinationDirectory, { recursive: true });
+  if (builtBinaries.length === 1) {
+    yield* fs.copyFile(builtBinaries[0]!, destinationPath);
+  } else {
+    yield* runCommand(
+      ChildProcess.make("lipo", ["-create", ...builtBinaries, "-output", destinationPath]),
+      { label: "lipo maeve speech helper universal binary", verbose: input.verbose },
+    );
+  }
+  if (input.platform !== "win") yield* fs.chmod(destinationPath, 0o755);
+  yield* fs.copyFile(
+    path.join(input.repoRoot, "apps/desktop/resources/voice/orb.html"),
+    path.join(destinationDirectory, "orb.html"),
+  );
 });
 
 export const stageBrowserSecret = Effect.fn("stageBrowserSecret")(function* (input: {
@@ -3757,6 +3814,13 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
   }
   yield* stageResourceMonitor({
+    repoRoot,
+    stageResourcesDir,
+    platform: options.platform,
+    arch: options.arch,
+    verbose: options.verbose,
+  });
+  yield* stageVoiceResources({
     repoRoot,
     stageResourcesDir,
     platform: options.platform,

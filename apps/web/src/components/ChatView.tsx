@@ -146,6 +146,7 @@ import { buildThreadRouteParams } from "../threadRoutes";
 import { useTheme } from "../hooks/useTheme";
 import { copyThreadReference } from "../lib/copyThreadReference";
 import { subscribeSnapShotComposerFocus } from "../lib/desktopSnapShot";
+import { composeDictatedPrompt, subscribeVoiceDictation, userDraftText } from "../lib/desktopVoice";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { FileMetadataThreadProvider } from "../hooks/FileMetadataThreadProvider";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
@@ -1830,6 +1831,34 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(
     () => (embedded ? undefined : subscribeSnapShotComposerFocus(focusComposerStable)),
     [embedded, focusComposerStable],
+  );
+  const takeVoiceDictation = useStableCallback(
+    (request: Parameters<Parameters<typeof subscribeVoiceDictation>[0]>[0]) => {
+      const composer = composerRef.current;
+      if (
+        request.handled ||
+        !composer ||
+        !activeThreadRef ||
+        activeThreadRef.environmentId !== request.environmentId ||
+        activeThreadRef.threadId !== request.threadId
+      ) {
+        return;
+      }
+      request.handled = true;
+      const current = composer.readSnapshot().value;
+      // Never send over, or discard, text the user typed themselves.
+      const submit = request.submit && userDraftText(current, request.replaces) === "";
+      request.heldForDraft = request.submit && !submit;
+      composer.setVoiceText(
+        submit ? request.text : composeDictatedPrompt(current, request.text, request.replaces),
+        submit,
+      );
+    },
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window listener for desktop voice dictations aimed at this thread
+  useEffect(
+    () => (embedded ? undefined : subscribeVoiceDictation(takeVoiceDictation)),
+    [embedded, takeVoiceDictation],
   );
   const scheduleComposerFocus = () => {
     window.requestAnimationFrame(() => {
