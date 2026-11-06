@@ -55,14 +55,18 @@ const make = Effect.gen(function* () {
       platform: environment.platform,
       speechBinary,
     });
-    if (!models.ok) yield* logInfo("voice models missing", { missing: models.missing.join(", ") });
+    // Voice is opt-in: without its models there is no orb, hotkey or engine at all.
+    if (!models.ok) {
+      yield* logInfo("voice is off: models not installed", { missing: models.missing.join(", ") });
+      return;
+    }
     const controller = new VoiceController({
       platform: environment.platform,
       voiceDirectory,
       workerDirectory: environment.dirname,
       orbPage,
-      engineConfig: models.ok ? models.config : undefined,
-      missingModels: models.ok ? [] : models.missing,
+      engineConfig: models.config,
+      missingModels: [],
       mainWindow: () => Option.getOrUndefined(runSync(electronWindow.main)),
       createWindow: (options) =>
         runSync(Effect.orDie(electronWindow.create(options, { auxiliary: true }))),

@@ -49,7 +49,8 @@ export async function cleanupDictation(
     const cleaned = (body.choices?.[0]?.message?.content ?? "")
       .replace(/<\/?transcript>/g, "")
       .trim();
-    return cleaned ? done(cleaned, "model") : done(text, "raw");
+    // The prompt answers nothing for filler-only speech ("um, uh"); there is nothing to deliver.
+    return done(cleaned, "model");
   } catch {
     return done(text, "raw");
   }

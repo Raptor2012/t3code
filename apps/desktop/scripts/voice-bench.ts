@@ -179,5 +179,5 @@ async function fetchModelOnly(raw: string, url: string): Promise<string> {
     }),
   });
   const body = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  return (body.choices?.[0]?.message?.content ?? "").trim() || raw;
+  return (body.choices?.[0]?.message?.content ?? "").trim();
 }

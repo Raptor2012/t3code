@@ -158,7 +158,7 @@ export class VoiceController {
     this.startEngine();
     void startVoiceHotkeys(
       this.options.platform,
-      NodePath.join(this.options.workerDirectory, "VoiceHotkeyWorker.cjs"),
+      NodePath.join(this.options.workerDirectory, "voice", "VoiceHotkeyWorker.cjs"),
       (event) => this.onHotkey(event),
       (error) => this.options.log("voice hotkeys stopped", { error: error.message }),
     ).then(
@@ -188,7 +188,7 @@ export class VoiceController {
       return;
     }
     this.engine = startVoiceEngineProcess(
-      NodePath.join(this.options.workerDirectory, "VoiceEngineWorker.cjs"),
+      NodePath.join(this.options.workerDirectory, "voice", "VoiceEngineWorker.cjs"),
       config,
       (code) => {
         this.options.log("voice engine exited", { code });
