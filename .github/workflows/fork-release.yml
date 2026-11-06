@@ -162,7 +162,9 @@ jobs:
   release:
     name: Publish release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+    # macOS is experimental and GitHub's hosted Mac runners sometimes never pick
+    # up a job, so a release ships once Windows and Linux are built.
+    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/v') || inputs.publish) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -189,6 +191,20 @@ jobs:
           pattern: desktop-*
           merge-multiple: true
           path: release-assets
+
+      - name: Require Windows and Linux builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          for manifest in latest.yml latest-linux.yml; do
+            if [[ ! -f "release-assets/$manifest" ]]; then
+              echo "Missing $manifest: the Windows or Linux build failed." >&2
+              exit 1
+            fi
+          done
+          if [[ ! -f release-assets/latest-mac.yml ]]; then
+            echo "::warning::No macOS build in this release."
+          fi
 
       # electron-updater reads one manifest per platform and picks the entry
       # for the running arch, so the per-arch macOS manifests are merged.
