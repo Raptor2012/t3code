@@ -17,7 +17,11 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 
 import { createInitialDesktopUpdateState } from "../updates/updateMachine.ts";
-import { listen, resolveStartupRecoveryOffer } from "./DesktopStartupRecovery.ts";
+import {
+  listen,
+  resolveReleasesUrl,
+  resolveStartupRecoveryOffer,
+} from "./DesktopStartupRecovery.ts";
 
 const updateState = (patch: Partial<DesktopUpdateState>): DesktopUpdateState => ({
   ...createInitialDesktopUpdateState(
@@ -95,6 +99,15 @@ describe("resolveStartupRecoveryOffer", () => {
       _tag: "Releases",
     });
   });
+});
+
+it.each([
+  { repository: "Raptor2012/t3code", url: "https://github.com/Raptor2012/t3code/releases" },
+  { repository: undefined, url: "https://github.com/pingdotgg/t3code/releases" },
+  { repository: "../t3code", url: "https://github.com/pingdotgg/t3code/releases" },
+  { repository: "a/b/c", url: "https://github.com/pingdotgg/t3code/releases" },
+])("links releases for the update repository $repository", ({ repository, url }) => {
+  expect(resolveReleasesUrl(repository)).toBe(url);
 });
 
 it.effect.each([

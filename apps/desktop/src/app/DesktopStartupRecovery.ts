@@ -18,7 +18,28 @@ import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
 import * as DesktopState from "./DesktopState.ts";
 
-const RELEASES_URL = "https://github.com/pingdotgg/t3code/releases";
+declare const __T3CODE_BUILD_DESKTOP_UPDATE_REPOSITORY__: string | undefined;
+
+const DEFAULT_RELEASE_REPOSITORY = "pingdotgg/t3code";
+const GITHUB_REPOSITORY_SEGMENT = /^(?!\.{1,2}$)[A-Za-z0-9._-]+$/u;
+
+// Builds publish their update feed to a configured repository; link releases there too.
+export function resolveReleasesUrl(repository: string | undefined): string {
+  const [owner, name, ...extra] = repository?.trim().split("/") ?? [];
+  const valid =
+    owner !== undefined &&
+    name !== undefined &&
+    extra.length === 0 &&
+    GITHUB_REPOSITORY_SEGMENT.test(owner) &&
+    GITHUB_REPOSITORY_SEGMENT.test(name);
+  return `https://github.com/${valid ? `${owner}/${name}` : DEFAULT_RELEASE_REPOSITORY}/releases`;
+}
+
+const RELEASES_URL = resolveReleasesUrl(
+  typeof __T3CODE_BUILD_DESKTOP_UPDATE_REPOSITORY__ === "undefined"
+    ? undefined
+    : __T3CODE_BUILD_DESKTOP_UPDATE_REPOSITORY__,
+);
 const LAST_STARTED_VERSION_FILE = "desktop-last-started-version";
 // Buttons are plain links to this host; will-navigate cancels them and runs the action.
 const ACTION_ORIGIN = "https://startup-recovery.invalid";
