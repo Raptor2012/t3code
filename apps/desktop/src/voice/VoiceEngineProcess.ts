@@ -29,6 +29,7 @@ export interface VoiceEngineProcess {
     onAudio: (pcm: Float32Array) => void,
   ) => { readonly id: number; readonly done: Promise<{ ttfaMs: number; stopped: boolean }> };
   readonly stop: (id?: number) => void;
+  readonly setFx: (on: boolean) => void;
   readonly close: () => void;
 }
 
@@ -124,6 +125,7 @@ export function startVoiceEngineProcess(
       return { id, done };
     },
     stop: (id) => request({ type: "stop", id }),
+    setFx: (on) => request({ type: "fx", on }),
     close: () => {
       if (child.connected) child.disconnect();
       const forceKill = setTimeout(() => child.kill(), 2_000);

@@ -200,6 +200,7 @@ export class VoiceController {
     this.engine.ready.then(
       (ready) => {
         this.options.log("voice engine ready", { ...ready });
+        this.engine?.setFx(this.prefs.voiceFx !== false);
         this.setState(this.idleState());
         this.detail = "";
       },
@@ -863,6 +864,7 @@ export class VoiceController {
         return undefined;
       case "toggle_voice_fx":
         this.setPrefs({ voiceFx: this.prefs.voiceFx === false });
+        this.engine?.setFx(this.prefs.voiceFx !== false);
         return undefined;
       case "toggle_mic_mute":
         this.setPrefs({ micMuted: !this.prefs.micMuted });

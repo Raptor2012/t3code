@@ -26,6 +26,8 @@ export interface Speech {
   ) => { readonly id: number; readonly done: Promise<SpokenResult> };
   /** Stops one utterance, or everything queued and playing when `id` is omitted. */
   readonly stop: (id?: number) => void;
+  /** Turns the Techno audio effect on Maeve's voice on or off. */
+  readonly setFx: (on: boolean) => void;
   readonly close: () => void;
 }
 
@@ -87,6 +89,10 @@ export function startSpeech(options: SpeechOptions): Promise<Speech> {
             },
             stop: (id = 0) => {
               child.stdin.write(`${JSON.stringify({ op: "stop", id })}\n`);
+            },
+            setFx: (on) => {
+              child.stdin.write(`${JSON.stringify({ op: "fx", on })}
+`);
             },
             close: () => {
               child.stdin.end();

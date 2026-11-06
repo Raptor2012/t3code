@@ -6,6 +6,7 @@
 //! stdin: one JSON request per line.
 //!   {"op":"speak","id":7,"text":"Hello."}   queue an utterance
 //!   {"op":"stop","id":7}                     stop utterance 7 (0 stops everything)
+//!   {"op":"fx","on":false}                   turn the Techno audio effect off or on
 //! stdout: frames of `[u32 length][u8 kind][u32 id][payload]`, little-endian, where length counts
 //! kind, id and payload.
 //!   kind 1 ready  payload: JSON {"sampleRate":24000,"voices":[...]}
@@ -13,6 +14,9 @@
 //!   kind 3 done   payload: JSON {"samples":n,"ttfaMs":x,"totalMs":y,"stopped":bool}
 //!   kind 4 error  payload: UTF-8 message
 
+mod fx;
+
+use fx::VoiceFx;
 use ptts::checkpoint::read_config;
 use ptts::preprocess::Normalize;
 use ptts::synth::{DeviceKind, Quant, SpeechOptions, Synth, SynthBuilder};
@@ -20,7 +24,7 @@ use serde::Deserialize;
 use std::collections::VecDeque;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
@@ -36,6 +40,7 @@ const WEIGHTS: [(&str, Quant); 2] =
 enum Request {
     Speak { id: u32, text: String },
     Stop { id: u32 },
+    Fx { on: bool },
 }
 
 struct Args {
@@ -44,6 +49,7 @@ struct Args {
     lang: String,
     temperature: f32,
     seed: u64,
+    fx: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -53,6 +59,7 @@ fn parse_args() -> Result<Args, String> {
         lang: "en".into(),
         temperature: 0.3,
         seed: 4242424242424242,
+        fx: true,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -63,6 +70,7 @@ fn parse_args() -> Result<Args, String> {
             "--lang" => args.lang = value,
             "--temperature" => args.temperature = value.parse().map_err(|_| "bad --temperature")?,
             "--seed" => args.seed = value.parse().map_err(|_| "bad --seed")?,
+            "--fx" => args.fx = value != "off",
             _ => return Err(format!("unknown flag {flag}")),
         }
     }
@@ -114,7 +122,29 @@ struct Queue {
     closed: bool,
 }
 
+/// `--fx-test <in.f32> <out.f32> <chunk>`: runs raw audio through the effect in chunks, then its
+/// tail, so the port can be compared against the reference implementation.
+fn fx_test(args: &[String]) {
+    let input = std::fs::read(&args[0]).expect("read input");
+    let samples: Vec<f32> =
+        input.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+    let chunk: usize = args[2].parse().expect("chunk size");
+    let mut fx = VoiceFx::new();
+    let mut out: Vec<f32> = Vec::new();
+    for part in samples.chunks(chunk) {
+        out.extend(fx.process(part));
+    }
+    out.extend(fx.drain(0.5));
+    let bytes: Vec<u8> = out.iter().flat_map(|s| s.to_le_bytes()).collect();
+    std::fs::write(&args[1], bytes).expect("write output");
+}
+
 fn main() {
+    let argv: Vec<String> = std::env::args().collect();
+    if argv.get(1).map(String::as_str) == Some("--fx-test") {
+        fx_test(&argv[2..]);
+        return;
+    }
     let mut out = Out(std::io::stdout().lock());
     let args = match parse_args() {
         Ok(args) => args,
@@ -164,8 +194,10 @@ fn main() {
     // Id of the utterance being spoken; a stop for it (or for 0) sets `cancel` to that id.
     let current = Arc::new(AtomicU32::new(0));
     let cancel = Arc::new(AtomicU32::new(0));
+    let fx_on = Arc::new(AtomicBool::new(args.fx));
     {
-        let (queue, current, cancel) = (queue.clone(), current.clone(), cancel.clone());
+        let (queue, current, cancel, fx_on) =
+            (queue.clone(), current.clone(), cancel.clone(), fx_on.clone());
         std::thread::spawn(move || {
             for line in std::io::stdin().lock().lines() {
                 let Ok(line) = line else { break };
@@ -174,6 +206,7 @@ fn main() {
                 let mut q = lock.lock().unwrap();
                 match request {
                     Request::Speak { id, text } => q.jobs.push_back((id, text)),
+                    Request::Fx { on } => fx_on.store(on, Ordering::SeqCst),
                     Request::Stop { id } => {
                         q.jobs.retain(|(job, _)| id != 0 && *job != id);
                         let speaking = current.load(Ordering::SeqCst);
@@ -190,6 +223,7 @@ fn main() {
         });
     }
 
+    let mut fx = VoiceFx::new();
     loop {
         let (id, text) = {
             let (lock, cv) = &*queue;
@@ -222,6 +256,14 @@ fn main() {
                 }
                 ttfa.get_or_insert(start.elapsed());
                 samples += pcm.len();
+                let pcm = if fx_on.load(Ordering::SeqCst) {
+                    fx.process(&pcm)
+                } else {
+                    if fx.tail_live() {
+                        fx.reset();
+                    }
+                    pcm
+                };
                 if !out.audio(id, &pcm) {
                     std::process::exit(0);
                 }
@@ -230,6 +272,17 @@ fn main() {
         });
         current.store(0, Ordering::SeqCst);
         let _ = cancel.compare_exchange(id, 0, Ordering::SeqCst, Ordering::SeqCst);
+        // The reverb tail rings out only when nothing follows; the next sentence carries it on.
+        if stopped {
+            fx.reset();
+        } else if fx.tail_live() && queue.0.lock().unwrap().jobs.is_empty() {
+            let tail = fx.drain(0.5);
+            for part in tail.chunks(2400) {
+                if !out.audio(id, part) {
+                    std::process::exit(0);
+                }
+            }
+        }
         match result.map_err(|e| e.to_string()).and_then(|r| r) {
             Ok(()) => {
                 let done = serde_json::json!({

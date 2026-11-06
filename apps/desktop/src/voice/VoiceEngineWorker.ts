@@ -109,6 +109,9 @@ process.on("message", (request: VoiceEngineRequest) => {
     case "speak":
       speak(request);
       break;
+    case "fx":
+      speech?.setFx(request.on);
+      break;
     case "stop": {
       const helperId = request.id === undefined ? undefined : utterances.get(request.id);
       if (request.id === undefined || helperId !== undefined) speech?.stop(helperId);

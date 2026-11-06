@@ -29,7 +29,8 @@ export type VoiceEngineRequest =
       readonly cleanup: boolean;
     }
   | { readonly type: "speak"; readonly id: number; readonly text: string }
-  | { readonly type: "stop"; readonly id?: number | undefined };
+  | { readonly type: "stop"; readonly id?: number | undefined }
+  | { readonly type: "fx"; readonly on: boolean };
 
 export interface DictationResult {
   readonly raw: string;
