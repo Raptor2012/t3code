@@ -991,6 +991,10 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/prod-resources/windows-server/**/*",
   "!apps/desktop/prod-resources/wsl-runtime.tar.gz",
   "!apps/desktop/prod-resources/wsl-runtime.tar.gz.sha256",
+  // The voice helper ships as an extra resource; a copy inside ASAR cannot be spawned.
+  "!apps/desktop/prod-resources/voice",
+  "!apps/desktop/prod-resources/voice/**/*",
+  "!apps/desktop/resources/voice/t3-maeve-tts*",
   "!apps/desktop/gnome-extension",
   "!apps/desktop/gnome-extension/**/*",
 ] as const;

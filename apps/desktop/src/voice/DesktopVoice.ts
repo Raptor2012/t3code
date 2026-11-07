@@ -34,16 +34,21 @@ const make = Effect.gen(function* () {
   const controllerRef = yield* Ref.make<VoiceController | undefined>(undefined);
   const path = environment.path;
 
-  const resource = (name: string) =>
+  // Electron reports files inside app.asar as existing, but an executable there cannot be spawned.
+  const resource = (name: string, { executable = false } = {}) =>
     environment
       .resolveResourcePathCandidates(name)
-      .find((candidate) => NodeFS.existsSync(candidate));
+      .find(
+        (candidate) =>
+          !(executable && /\.asar([\\/]|$)/.test(candidate)) && NodeFS.existsSync(candidate),
+      );
 
   const initialize = Effect.gen(function* () {
     if ((yield* Ref.get(controllerRef)) !== undefined) return;
     const voiceDirectory = path.join(environment.baseDir, "voice");
     const speechBinary = resource(
       path.join("voice", environment.platform === "win32" ? "t3-maeve-tts.exe" : "t3-maeve-tts"),
+      { executable: true },
     );
     const orbPage = resource(path.join("voice", "orb.html"));
     if (!orbPage) {
@@ -71,12 +76,13 @@ const make = Effect.gen(function* () {
       createWindow: (options) =>
         runSync(Effect.orDie(electronWindow.create(options, { auxiliary: true }))),
       log: (message, detail) => {
-        runFork(logInfo(message, detail ?? {}));
+        // Log events outside a span never reach desktop.trace.ndjson.
+        runFork(logInfo(message, detail ?? {}).pipe(Effect.withSpan("desktop.voice.event")));
       },
     });
     controller.start();
     yield* Ref.set(controllerRef, controller);
-  });
+  }).pipe(Effect.withSpan("desktop.voice.initialize"));
 
   const dispose = Effect.gen(function* () {
     const controller = yield* Ref.get(controllerRef);

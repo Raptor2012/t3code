@@ -42,6 +42,10 @@ interface Prefs {
   anchor?: [number, number];
   voiceThreads?: Record<string, boolean>;
   startup?: boolean;
+  highContrast?: boolean;
+  reducedMotion?: boolean;
+  /** Set once the first-run introduction has been shown. */
+  introduced?: boolean;
 }
 
 interface Review {
@@ -137,6 +141,10 @@ export class VoiceController {
   private pinUntil = 0;
   private expanded = false;
   private hovered = false;
+  private expandedAt = 0;
+  private cardFocused = false;
+  private outsideSince: number | undefined;
+  private cardCloseAt: number | undefined;
   private panelExtra = false;
   private choosingDelivery = false;
   private hitRects: HitRect[] = [];
@@ -195,6 +203,7 @@ export class VoiceController {
         this.engine = undefined;
         this.setState("error");
         this.detail = "The voice engine stopped. Restart T3 Code to start it again.";
+        this.showBubble("maeve", this.detail, "engine-error", 15_000);
       },
     );
     this.engine.ready.then(
@@ -203,11 +212,13 @@ export class VoiceController {
         this.engine?.setFx(this.prefs.voiceFx !== false);
         this.setState(this.idleState());
         this.detail = "";
+        this.introduce();
       },
       (error: Error) => {
         this.options.log("voice engine failed", { error: error.message });
         this.setState("error");
         this.detail = `Voice could not start: ${error.message}`;
+        this.showBubble("maeve", this.detail, "engine-error", 15_000);
       },
     );
   }
@@ -311,7 +322,7 @@ export class VoiceController {
         target,
       };
       this.dictState = "";
-      this.window?.setFocusable(true);
+      this.setFocus(true);
       return;
     }
     try {
@@ -370,7 +381,7 @@ export class VoiceController {
     this.deliver(review.target, review.text, "send").then(
       () => {
         if (this.review?.id === id) this.review = null;
-        this.window?.setFocusable(false);
+        this.setFocus(false);
       },
       (error: Error) => {
         if (this.review?.id !== id) return;
@@ -383,7 +394,78 @@ export class VoiceController {
   private cancelReview() {
     if (this.review?.sending) return;
     this.review = null;
-    this.window?.setFocusable(false);
+    this.setFocus(false);
+  }
+
+  // The orb never takes focus, except while the settings card or a review needs the keyboard.
+  private setFocus(active: boolean) {
+    const window = this.window;
+    if (!window || window.isDestroyed()) return;
+    window.setFocusable(active);
+    if (active) {
+      window.focus();
+      window.webContents.focus();
+    }
+  }
+
+  private setExpanded(expanded: boolean) {
+    this.cardCloseAt = undefined;
+    const size = [SURFACE.width, SURFACE.height];
+    if (expanded === this.expanded) return { expanded, size };
+    if (expanded && this.review?.sending) return { expanded: false, size };
+    if (expanded && this.review) {
+      this.review = null;
+      this.setState(this.idleState());
+    }
+    this.expanded = expanded;
+    this.expandedAt = Date.now();
+    this.cardFocused = false;
+    this.outsideSince = undefined;
+    if (!expanded) this.panelExtra = false;
+    this.showUntil = Date.now() + LINGER_MS;
+    this.setFocus(expanded);
+    return { expanded, size };
+  }
+
+  // Closes the settings card when the user clicks another window or leaves it for 2.5 s.
+  private watchCard(now: number) {
+    if (!this.expanded || this.review || !this.window) return;
+    if (this.choosingDelivery) {
+      this.cardCloseAt = undefined;
+      this.outsideSince = undefined;
+      return;
+    }
+    if (this.cardCloseAt !== undefined) {
+      // The page animates its exit and acknowledges; this is the fallback if it cannot.
+      if (now >= this.cardCloseAt + 700) this.setExpanded(false);
+      return;
+    }
+    if (now - this.expandedAt < 800) return;
+    const ours = this.window.isFocused();
+    if (ours) this.cardFocused = true;
+    const inside = this.cursorInside();
+    this.outsideSince = inside ? undefined : (this.outsideSince ?? now);
+    if (
+      (this.cardFocused && !ours && !inside) ||
+      (this.outsideSince !== undefined && now - this.outsideSince > 2500)
+    ) {
+      this.cardCloseAt = now;
+    }
+  }
+
+  private introduce() {
+    if (this.prefs.introduced) return;
+    this.setPrefs({ introduced: true });
+    const dictate =
+      this.options.platform === "linux"
+        ? ""
+        : "Hold Mouse Forward and talk to dictate into T3, then let go. ";
+    this.showBubble(
+      "maeve",
+      `Hi, I'm Maeve. ${dictate}Click me to choose which threads I read aloud.`,
+      "intro",
+      14_000,
+    );
   }
 
   private onReply(reply: DesktopVoiceReply) {
@@ -609,6 +691,7 @@ export class VoiceController {
     if (this.state === "waiting" && now > this.sentAt + 2500 && this.agentActivity === "") {
       this.setState(this.idleState());
     }
+    this.watchCard(now);
     if (this.wantsVisible(now)) {
       this.showUntil = now + LINGER_MS;
       this.hideAt = undefined;
@@ -630,17 +713,22 @@ export class VoiceController {
   private updateClickThrough() {
     const window = this.window;
     if (!window || !window.isVisible()) return;
+    const through = !this.cursorInside();
+    if (through === this.clickThrough) return;
+    window.setIgnoreMouseEvents(through, { forward: true });
+    this.clickThrough = through;
+  }
+
+  private cursorInside(): boolean {
+    const window = this.window;
+    if (!window) return false;
     const cursor = Electron.screen.getCursorScreenPoint();
     const bounds = window.getBounds();
     const x = cursor.x - bounds.x;
     const y = cursor.y - bounds.y;
-    const inside = this.hitRects.some(
+    return this.hitRects.some(
       (rect) => x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom,
     );
-    const through = !inside;
-    if (through === this.clickThrough) return;
-    window.setIgnoreMouseEvents(through, { forward: true });
-    this.clickThrough = through;
   }
 
   private setHitRegions(regions: unknown) {
@@ -714,8 +802,8 @@ export class VoiceController {
     return {
       agent: this.agentActivity ? { activity: this.agentActivity } : {},
       visualEvents: { ...this.visualEvents },
-      highContrast: false,
-      reducedMotion: false,
+      highContrast: Boolean(this.prefs.highContrast),
+      reducedMotion: Boolean(this.prefs.reducedMotion),
       playback: this.playback ? { ...this.playback } : null,
       state: dictating ? this.dictState : this.state,
       text: this.dictState === "failed" ? this.dictError : "",
@@ -742,7 +830,7 @@ export class VoiceController {
       followActive: following,
       expanded: this.expanded,
       hovered: this.hovered,
-      settingsCloseRequest: 0,
+      settingsCloseRequest: this.cardCloseAt ?? 0,
       viewportTarget: [SURFACE.width, SURFACE.height],
       voiceFx: this.prefs.voiceFx !== false,
       delivery: this.prefs.delivery ?? "review",
@@ -878,6 +966,14 @@ export class VoiceController {
         return undefined;
       case "toggle_startup":
         this.setPrefs({ startup: this.prefs.startup === false });
+        return undefined;
+      case "set_expanded":
+        return this.setExpanded(Boolean(args[0]));
+      case "set_hover":
+        this.hovered = Boolean(args[0]);
+        return undefined;
+      case "set_appearance":
+        this.setPrefs({ highContrast: Boolean(args[0]), reducedMotion: Boolean(args[1]) });
         return undefined;
       case "set_panel_extra":
         this.panelExtra = Boolean(args[0]);

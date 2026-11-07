@@ -15,6 +15,7 @@ const send = (event: VoiceEngineEvent) => {
 let stt: SpeechToText | undefined;
 let llama: LlamaServer | undefined;
 let speech: Speech | undefined;
+let closing = false;
 // Main ids for utterances, by the speech helper's own ids.
 const utterances = new Map<number, number>();
 
@@ -22,7 +23,7 @@ async function init(request: Extract<VoiceEngineRequest, { type: "init" }>) {
   const start = performance.now();
   const { config } = request;
   try {
-    const [loadedStt, loadedSpeech, loadedLlama] = await Promise.all([
+    const [loadedStt, loadedSpeech, loadedLlama] = await Promise.allSettled([
       loadSpeechToText(config.speechToText),
       startSpeech(config.speech),
       config.cleanup
@@ -34,9 +35,22 @@ async function init(request: Extract<VoiceEngineRequest, { type: "init" }>) {
           }).catch(() => undefined)
         : Promise.resolve(undefined),
     ]);
-    stt = loadedStt;
-    speech = loadedSpeech;
-    llama = loadedLlama;
+    if (loadedStt.status === "rejected" || loadedSpeech.status === "rejected") {
+      // Release whatever did start, so a failed engine never sits on the GPU.
+      if (loadedSpeech.status === "fulfilled") loadedSpeech.value.close();
+      if (loadedLlama.status === "fulfilled") loadedLlama.value?.stop();
+      const [what, failed] =
+        loadedStt.status === "rejected"
+          ? ["speech to text", loadedStt]
+          : ["Maeve's voice", loadedSpeech as PromiseRejectedResult];
+      throw new Error(`${what}: ${(failed.reason as Error).message}`);
+    }
+    stt = loadedStt.value;
+    speech = loadedSpeech.value;
+    llama = loadedLlama.status === "fulfilled" ? loadedLlama.value : undefined;
+    void speech.exited.then(() => {
+      if (!closing) shutdown(1);
+    });
     // Warm the cleanup prompt cache so the first dictation is as fast as the rest.
     if (llama)
       await cleanupDictation(
@@ -120,10 +134,11 @@ process.on("message", (request: VoiceEngineRequest) => {
   }
 });
 
-const shutdown = () => {
+function shutdown(code = 0) {
+  closing = true;
   speech?.close();
   llama?.stop();
-  process.exit(0);
-};
-process.once("disconnect", shutdown);
-process.once("SIGTERM", shutdown);
+  process.exit(code);
+}
+process.once("disconnect", () => shutdown());
+process.once("SIGTERM", () => shutdown());

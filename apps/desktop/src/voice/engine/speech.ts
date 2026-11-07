@@ -28,6 +28,8 @@ export interface Speech {
   readonly stop: (id?: number) => void;
   /** Turns the Techno audio effect on Maeve's voice on or off. */
   readonly setFx: (on: boolean) => void;
+  /** Settles when the helper process ends, for whatever reason. */
+  readonly exited: Promise<number | null>;
   readonly close: () => void;
 }
 
@@ -55,6 +57,12 @@ export function startSpeech(options: SpeechOptions): Promise<Speech> {
   const pending = new Map<number, Pending>();
   let nextId = 1;
   let buffered: Buffer = Buffer.alloc(0);
+  // A write after the helper died must not crash the engine; `exited` reports the death.
+  child.stdin.on("error", () => undefined);
+  const exited = new Promise<number | null>((resolveExit) => {
+    child.once("exit", resolveExit);
+    child.once("error", () => resolveExit(null));
+  });
 
   return new Promise((resolve, reject) => {
     let ready = false;
@@ -94,6 +102,7 @@ export function startSpeech(options: SpeechOptions): Promise<Speech> {
               child.stdin.write(`${JSON.stringify({ op: "fx", on })}
 `);
             },
+            exited,
             close: () => {
               child.stdin.end();
               child.kill();
