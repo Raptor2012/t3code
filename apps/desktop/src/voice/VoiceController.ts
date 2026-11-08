@@ -31,11 +31,8 @@ const MIN_DICTATION_SAMPLES = 16000 * 0.25;
 const TICK_MS = 33;
 const DRAG_HOLD_MS = 600;
 const LEAVE_T3_MS = 300;
-// How far the orb's window base dips into the top of the message box.
-const DOCK_OVERLAP = 8;
-const LISTEN_RESUME_MS = 300;
-// A hands-free conversation ends by itself after this long with nobody talking.
-const CONVERSATION_IDLE_MS = 120_000;
+// How far below its slot the orb's window ends, which centers the orb in the slot.
+const DOCK_OVERLAP = 18;
 
 type Delivery = "immediate" | "review" | "composer";
 type DictState = "" | "dictating" | "processing" | "done" | "failed";
@@ -172,10 +169,7 @@ export class VoiceController {
   private home = "";
   private dock: DesktopVoiceDock | null = null;
   private docked = false;
-  private conversation = false;
-  private listening = false;
-  private lastHeardAt = 0;
-  private speechEndsAt = 0;
+  private talking = false;
   private pushedState = "";
   private liveWords: Promise<unknown> | undefined;
 
@@ -258,7 +252,6 @@ export class VoiceController {
   private voiceOn(): boolean {
     const target = this.target;
     if (!target) return false;
-    if (this.conversation) return true;
     if (this.prefs.followActive !== false && this.activeThread === null) return false;
     return Boolean(this.prefs.voiceThreads?.[threadKey(target)]);
   }
@@ -277,8 +270,9 @@ export class VoiceController {
     else this.endDictation();
   }
 
-  private async beginDictation(): Promise<void> {
+  private async beginDictation(talking = false): Promise<void> {
     if (this.recording || !this.engine || this.prefs.micMuted || this.review?.sending) return;
+    this.talking = talking;
     this.stopSpeech(true);
     // A new dictation replaces an unsent draft, so its live words are never hidden behind it.
     if (this.review) {
@@ -304,7 +298,7 @@ export class VoiceController {
       const shown = this.preview.complete(request.session, decode);
       if (!shown || this.review) return;
       this.dictPreviewText = shown.slice(-1200);
-      if (this.target && this.docked && !this.conversation) {
+      if (this.target && this.docked) {
         this.liveWords = this.deliver(this.target, shown, "live").catch(() => undefined);
       }
     };
@@ -369,7 +363,7 @@ export class VoiceController {
     await this.liveWords;
     this.liveWords = undefined;
     if (session !== this.dictSession) return;
-    const delivery = this.conversation ? "immediate" : (this.prefs.delivery ?? "review");
+    const delivery = this.talking ? "immediate" : (this.prefs.delivery ?? "review");
     if (delivery === "review" && !this.docked) {
       // Lands in the field you were typing in first, while T3 still has the keyboard.
       await this.deliver(target, text, "composer").catch((error: Error) =>
@@ -579,7 +573,6 @@ export class VoiceController {
     const job = engine.speak(text, (pcm) => {
       if (this.speaking !== speaking) return;
       if (this.playback?.run === run) this.playback.total += pcm.length;
-      this.speechEndsAt = Math.max(Date.now(), this.speechEndsAt) + (pcm.length / 24000) * 1000;
       this.window?.webContents.send("voice-orb:audio", { id: run, pcm });
     });
     speaking.utterances.add(job.id);
@@ -606,7 +599,6 @@ export class VoiceController {
     if (this.speaking) this.reader.silence(this.speaking.message);
     this.speaking = undefined;
     this.playback = null;
-    this.speechEndsAt = 0;
     if (interrupt) this.visualEvents.interrupt++;
     this.setState(this.idleState());
   }
@@ -794,72 +786,26 @@ export class VoiceController {
         if (this.recording) this.endDictation();
         else void this.beginDictation();
         break;
-      case "start-conversation":
-        if (!this.engine || !this.target) break;
-        this.conversation = true;
-        this.lastHeardAt = Date.now();
-        this.stopSpeech(false);
+      case "talk-start":
+        if (!this.target) break;
+        // Holding the button asks for a spoken reply, whatever the thread was set to.
+        this.setPrefs({
+          voiceThreads: { ...this.prefs.voiceThreads, [threadKey(this.target)]: true },
+        });
+        void this.beginDictation(true);
         break;
-      case "end-conversation":
-        this.endConversation();
-        break;
-      case "toggle-mic":
-        this.setPrefs({ micMuted: !this.prefs.micMuted });
-        break;
-      case "toggle-output":
-        this.setPrefs({ maeveMuted: !this.prefs.maeveMuted });
-        if (this.prefs.maeveMuted) this.stopSpeech(false);
+      case "talk-end":
+        this.endDictation();
         break;
     }
-  }
-
-  private endConversation() {
-    this.conversation = false;
-    this.stopSpeech(true);
-    if (this.recording) {
-      this.recording = false;
-      this.dictSession++;
-      this.dictState = "";
-      this.preview.stop();
-      this.window?.webContents.send("voice-orb:record-stop");
-    }
-    this.setListening(false);
-  }
-
-  private setListening(on: boolean) {
-    if (on === this.listening) return;
-    this.listening = on;
-    this.window?.webContents.send("voice-orb:listen", on);
-  }
-
-  // Listens only while nothing else is happening, so the mic never hears the voice agent's own
-  // reply and a coding agent is never sent speech while it is working.
-  private runConversation(now: number) {
-    if (this.recording) return;
-    const listen =
-      this.conversation &&
-      !this.prefs.micMuted &&
-      !this.dictState &&
-      !this.speaking &&
-      now >= this.speechEndsAt + LISTEN_RESUME_MS &&
-      this.agentActivity === "" &&
-      this.state !== "waiting";
-    if (!listen) this.lastHeardAt = now;
-    else if (now - this.lastHeardAt > CONVERSATION_IDLE_MS) {
-      this.endConversation();
-      return;
-    }
-    this.setListening(listen);
   }
 
   private pushVoiceState() {
     const main = this.options.mainWindow();
     if (!main || main.isDestroyed()) return;
     const state: DesktopVoiceState = {
-      conversation: this.conversation,
       dictating: this.recording,
-      micMuted: Boolean(this.prefs.micMuted),
-      outputMuted: Boolean(this.prefs.maeveMuted),
+      talking: this.recording && this.talking,
     };
     const key = JSON.stringify(state);
     if (key === this.pushedState) return;
@@ -877,16 +823,7 @@ export class VoiceController {
   }
 
   private wantsVisible(now: number): boolean {
-    if (this.docked) {
-      return Boolean(
-        this.conversation ||
-        this.expanded ||
-        this.review ||
-        this.dictState ||
-        this.speaking ||
-        now < this.speechEndsAt,
-      );
-    }
+    if (this.docked) return true;
     if (this.agentActivity === "approval" || this.agentActivity === "input") return true;
     if (
       this.review ||
@@ -919,7 +856,6 @@ export class VoiceController {
     this.finishDrag(now);
     this.followT3(now);
     this.runPreview(now);
-    this.runConversation(now);
     this.pushVoiceState();
     // A thread opened during a dictation, review or reply was deferred; catch up once it ends.
     if (
@@ -1140,15 +1076,6 @@ export class VoiceController {
     );
     Electron.ipcMain.on("voice-orb:playback-failed", (event, message: string) => {
       if (fromOrb(event)) this.options.log("voice playback failed", { error: String(message) });
-    });
-    Electron.ipcMain.on("voice-orb:vad", (event, edge: "start" | "end") => {
-      if (!fromOrb(event) || !this.conversation) return;
-      if (edge === "start") {
-        this.lastHeardAt = Date.now();
-        void this.beginDictation();
-      } else {
-        this.endDictation();
-      }
     });
     Electron.ipcMain.on(
       IpcChannels.VOICE_COMMAND_CHANNEL,

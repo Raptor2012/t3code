@@ -41,13 +41,13 @@ export function subscribeVoiceDictation(
   return () => window.removeEventListener(VOICE_DICTATION_EVENT, wrapped);
 }
 
-/** Where the orb should dock: centered on the message box, just above it. */
+/** Where the orb should dock: in the slot reserved for it above the message box. */
 export function measureVoiceDock(): DesktopVoiceDock | null {
-  const form = document.querySelector("[data-chat-composer-form]");
-  if (!form) return null;
-  const rect = form.getBoundingClientRect();
+  const slot = document.querySelector("[data-voice-orb-slot]");
+  if (!slot) return null;
+  const rect = slot.getBoundingClientRect();
   if (rect.width === 0) return null;
-  return { x: Math.round(rect.left + rect.width / 2), top: Math.round(rect.top) };
+  return { x: Math.round(rect.left + rect.width / 2), top: Math.round(rect.bottom) };
 }
 
 /** The smallest single replacement that turns `previous` into `next`. */

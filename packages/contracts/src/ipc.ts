@@ -1029,25 +1029,18 @@ export interface DesktopVoiceThread {
 }
 
 /** A finished dictation for a thread: placed in its composer, or sent as the next message. */
-/** In page coordinates: the message box's horizontal center and top edge. */
+/** In page coordinates: the horizontal center and bottom edge of the orb's slot. */
 export interface DesktopVoiceDock {
   readonly x: number;
   readonly top: number;
 }
 
-export type DesktopVoiceCommand =
-  | "toggle-dictation"
-  | "start-conversation"
-  | "end-conversation"
-  | "toggle-mic"
-  | "toggle-output";
+export type DesktopVoiceCommand = "toggle-dictation" | "talk-start" | "talk-end";
 
 export interface DesktopVoiceState {
-  /** A hands-free conversation is running. */
-  readonly conversation: boolean;
   readonly dictating: boolean;
-  readonly micMuted: boolean;
-  readonly outputMuted: boolean;
+  /** The current dictation is a held voice turn, sent to the thread on release. */
+  readonly talking: boolean;
 }
 
 export interface DesktopVoiceDelivery {

@@ -1,13 +1,5 @@
 import type { DesktopVoiceBridge, DesktopVoiceState } from "@t3tools/contracts";
-import {
-  AudioLinesIcon,
-  MicIcon,
-  MicOffIcon,
-  Volume2Icon,
-  VolumeXIcon,
-  XIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { AudioLinesIcon, MicIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { cn } from "../../lib/utils";
@@ -15,103 +7,89 @@ import { ComposerControl } from "../chat/ComposerControl";
 import { messageActionPillClassName } from "../chat/ComposerPrimaryActions";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-/** The message box's voice buttons: dictate, talk to the agent, and control a conversation. */
-export function VoiceControls() {
-  const bridge = typeof window === "undefined" ? undefined : window.desktopBridge?.voice;
-  return bridge ? <VoiceControlsWithBridge bridge={bridge} /> : null;
-}
-
-function VoiceControlsWithBridge({ bridge }: { bridge: DesktopVoiceBridge }) {
+function useVoiceState(bridge: DesktopVoiceBridge | undefined) {
   const [state, setState] = useState<DesktopVoiceState | null>(null);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the desktop voice engine's state, outside React
-  useEffect(() => bridge.onState(setState), [bridge]);
-  if (state === null) return null;
+  useEffect(() => bridge?.onState(setState), [bridge]);
+  return state;
+}
 
-  if (state.conversation) {
-    return (
-      <div className="flex shrink-0 items-center gap-1">
-        <ControlButton
-          label={state.outputMuted ? "Unmute the voice agent" : "Mute the voice agent"}
-          icon={state.outputMuted ? VolumeXIcon : Volume2Icon}
-          onClick={() => bridge.command("toggle-output")}
-        />
-        <ControlButton
-          label={state.micMuted ? "Unmute your microphone" : "Mute your microphone"}
-          icon={state.micMuted ? MicOffIcon : MicIcon}
-          onClick={() => bridge.command("toggle-mic")}
-        />
-        <PrimaryButton
-          label="End voice"
-          icon={XIcon}
-          onClick={() => bridge.command("end-conversation")}
-        />
-      </div>
-    );
-  }
+const voiceBridge = () => (typeof window === "undefined" ? undefined : window.desktopBridge?.voice);
+
+/** Keeps a band clear above the message box where the voice orb sits, so text ends above it. */
+export function VoiceOrbSlot() {
+  const state = useVoiceState(voiceBridge());
+  if (state === null) return null;
+  return (
+    <div
+      aria-hidden="true"
+      data-voice-orb-slot="true"
+      className="pointer-events-none h-24 bg-linear-to-t from-background from-85% to-transparent"
+    />
+  );
+}
+
+/** The message box's voice buttons: click to dictate, hold to talk to the agent. */
+export function VoiceControls() {
+  const bridge = voiceBridge();
+  const state = useVoiceState(bridge);
+  if (!bridge || state === null) return null;
+
+  const startTalking = () => bridge.command("talk-start");
+  const stopTalking = () => bridge.command("talk-end");
+  const dictateLabel = state.dictating && !state.talking ? "Stop dictating" : "Dictate";
   return (
     <div className="flex shrink-0 items-center gap-1">
-      <ControlButton
-        label={state.dictating ? "Stop dictating" : "Dictate"}
-        icon={MicIcon}
-        active={state.dictating}
-        onClick={() => bridge.command("toggle-dictation")}
-      />
-      <PrimaryButton
-        label="Talk to the voice agent"
-        icon={AudioLinesIcon}
-        onClick={() => bridge.command("start-conversation")}
-      />
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <ComposerControl
+              className={cn("shrink-0", state.dictating && !state.talking && "text-primary")}
+              aria-label={dictateLabel}
+              aria-pressed={state.dictating && !state.talking}
+              onClick={() => bridge.command("toggle-dictation")}
+            />
+          }
+        >
+          <MicIcon className="size-4" aria-hidden="true" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{dictateLabel}</TooltipPopup>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              className={cn(
+                messageActionPillClassName,
+                "size-8 touch-none select-none sm:size-7",
+                state.talking && "ring-2 ring-primary/40",
+              )}
+              aria-label="Hold to talk to the voice agent"
+              aria-pressed={state.talking}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                event.currentTarget.setPointerCapture(event.pointerId);
+                startTalking();
+              }}
+              onPointerUp={stopTalking}
+              onPointerCancel={stopTalking}
+              onLostPointerCapture={stopTalking}
+              onKeyDown={(event) => {
+                if ((event.key !== " " && event.key !== "Enter") || event.repeat) return;
+                event.preventDefault();
+                startTalking();
+              }}
+              onKeyUp={(event) => {
+                if (event.key === " " || event.key === "Enter") stopTalking();
+              }}
+            />
+          }
+        >
+          <AudioLinesIcon className="size-4" aria-hidden="true" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Hold to talk</TooltipPopup>
+      </Tooltip>
     </div>
-  );
-}
-
-interface ButtonProps {
-  readonly label: string;
-  readonly icon: LucideIcon;
-  readonly onClick: () => void;
-}
-
-function ControlButton({
-  label,
-  icon: Icon,
-  active = false,
-  onClick,
-}: ButtonProps & { readonly active?: boolean }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <ComposerControl
-            className={cn("shrink-0", active && "text-primary")}
-            aria-label={label}
-            aria-pressed={active}
-            onClick={onClick}
-          />
-        }
-      >
-        <Icon className="size-4" aria-hidden="true" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">{label}</TooltipPopup>
-    </Tooltip>
-  );
-}
-
-function PrimaryButton({ label, icon: Icon, onClick }: ButtonProps) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            className={cn(messageActionPillClassName, "size-8 sm:size-7")}
-            aria-label={label}
-            onClick={onClick}
-          />
-        }
-      >
-        <Icon className="size-4" aria-hidden="true" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">{label}</TooltipPopup>
-    </Tooltip>
   );
 }

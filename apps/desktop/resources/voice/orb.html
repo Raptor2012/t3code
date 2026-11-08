@@ -2044,7 +2044,7 @@
           applyExpanded(!!S.expanded);
         document.body.classList.toggle("reviewing", !!S.review);
         document.body.classList.toggle("docked", !!S.docked);
-        if (!barMode) R = S.docked ? 42 : 30;
+        if (!barMode) R = S.docked ? 36 : 30;
         reviewEl.classList.toggle("show", !!S.review);
         if (S.review && S.review.id !== reviewId) {
           reviewId = S.review.id;
