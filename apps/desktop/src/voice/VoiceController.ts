@@ -13,10 +13,12 @@ import type {
 import * as Electron from "electron";
 
 import * as IpcChannels from "../ipc/channels.ts";
+import { DictationPreview, type PreviewDecode } from "./dictationPreview.ts";
 import type { VoiceEngineConfig } from "./engine/protocol.ts";
 import { ReplyReader } from "./replyText.ts";
 import { startVoiceEngineProcess, type VoiceEngineProcess } from "./VoiceEngineProcess.ts";
 import { startVoiceHotkeys, type VoiceHotkeyEvent } from "./VoiceHotkeys.ts";
+import { followedVoiceOn } from "./voiceFollow.ts";
 
 // The page keeps a constant 340x480 surface; everything outside its visible parts passes clicks.
 const SURFACE = { width: 340, height: 480 };
@@ -112,6 +114,7 @@ export class VoiceController {
   private dictSession = 0;
   private dictPreviewText = "";
   private dictPreviewUntil = 0;
+  private readonly preview = new DictationPreview();
   private recording = false;
   private recordedWaiter: ((samples: Float32Array | undefined) => void) | undefined;
   /** The last dictation placed in a composer, which the next one replaces while unsent. */
@@ -252,17 +255,40 @@ export class VoiceController {
   private async beginDictation(): Promise<void> {
     if (this.recording || !this.engine || this.prefs.micMuted || this.review?.sending) return;
     this.stopSpeech(true);
+    // A new dictation replaces an unsent draft, so its live words are never hidden behind it.
+    if (this.review) {
+      this.review = null;
+      this.setFocus(false);
+    }
     this.recording = true;
     this.dictSession++;
     this.dictState = "dictating";
     this.dictPreviewText = "";
+    this.dictPreviewUntil = 0;
+    this.bubble = null;
+    this.bubbleUntil = 0;
+    this.preview.start();
     this.window?.webContents.send("voice-orb:record-start");
+  }
+
+  private runPreview(nowMs: number) {
+    const engine = this.engine;
+    const request = engine && this.preview.request(nowMs / 1000);
+    if (!engine || !request) return;
+    const finish = (decode: PreviewDecode) => {
+      const shown = this.preview.complete(request.session, decode);
+      if (shown && !this.review) this.dictPreviewText = shown.slice(-1200);
+    };
+    engine
+      .preview(request.samples, 16000)
+      .then(finish, () => finish({ text: "", tokens: [], timestamps: [] }));
   }
 
   private endDictation(): void {
     if (!this.recording) return;
     this.recording = false;
     this.dictState = "processing";
+    this.preview.stop();
     const session = this.dictSession;
     const recorded = new Promise<Float32Array | undefined>((resolve) => {
       this.recordedWaiter = resolve;
@@ -506,7 +532,11 @@ export class VoiceController {
     });
     speaking.utterances.add(job.id);
     void job.done
-      .catch(() => undefined)
+      .then(
+        ({ ttfaMs, stopped }) =>
+          this.options.log("voice speech", { ttfaMs: Math.round(ttfaMs), stopped }),
+        (error: Error) => this.options.log("voice speech failed", { error: error.message }),
+      )
       .finally(() => {
         speaking.utterances.delete(job.id);
         if (this.speaking === speaking && speaking.utterances.size === 0) {
@@ -571,6 +601,15 @@ export class VoiceController {
       !this.dictState &&
       !this.speaking
     ) {
+      if (this.prefs.followActive !== false) {
+        const key = threadKey(next);
+        const on = followedVoiceOn(
+          this.prefs.voiceThreads,
+          this.target ? threadKey(this.target) : undefined,
+          this.prefs.thread,
+        );
+        this.setPrefs({ thread: key, voiceThreads: { ...this.prefs.voiceThreads, [key]: on } });
+      }
       this.target = next;
       this.reader.reset();
       this.agentActivity = "";
@@ -692,6 +731,19 @@ export class VoiceController {
       this.setState(this.idleState());
     }
     this.watchCard(now);
+    this.runPreview(now);
+    // A thread opened during a dictation, review or reply was deferred; catch up once it ends.
+    if (
+      this.prefs.followActive !== false &&
+      this.activeThread &&
+      this.target &&
+      threadKey(this.activeThread) !== threadKey(this.target) &&
+      !this.review &&
+      !this.dictState &&
+      !this.speaking
+    ) {
+      this.onThreads(this.threads, this.activeThread);
+    }
     if (this.wantsVisible(now)) {
       this.showUntil = now + LINGER_MS;
       this.hideAt = undefined;
@@ -876,6 +928,15 @@ export class VoiceController {
         this.recordedWaiter = undefined;
       },
     );
+    Electron.ipcMain.on(
+      "voice-orb:preview-audio",
+      (event, samples: Float32Array, voiced: boolean) => {
+        if (fromOrb(event)) this.preview.push(samples, voiced);
+      },
+    );
+    Electron.ipcMain.on("voice-orb:playback-failed", (event, message: string) => {
+      if (fromOrb(event)) this.options.log("voice playback failed", { error: String(message) });
+    });
     Electron.ipcMain.on(
       IpcChannels.VOICE_THREADS_CHANNEL,
       (event, threads: DesktopVoiceThread[], active: DesktopVoiceThread | null) => {

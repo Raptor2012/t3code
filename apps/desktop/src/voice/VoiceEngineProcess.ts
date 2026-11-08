@@ -3,6 +3,7 @@
 
 import * as NodeChildProcess from "node:child_process";
 
+import type { PreviewDecode } from "./dictationPreview.ts";
 import type {
   DictationResult,
   VoiceEngineConfig,
@@ -23,6 +24,8 @@ export interface VoiceEngineProcess {
     sampleRate: number,
     cleanup: boolean,
   ) => Promise<DictationResult>;
+  /** Decodes audio for the words shown while the dictation key is held. */
+  readonly preview: (samples: Float32Array, sampleRate: number) => Promise<PreviewDecode>;
   /** Streams Maeve's audio for `text` to `onAudio`; resolves when she finishes or is stopped. */
   readonly speak: (
     text: string,
@@ -51,6 +54,7 @@ export function startVoiceEngineProcess(
   });
   let nextId = 1;
   const dictations = new Map<number, Waiter<DictationResult>>();
+  const previews = new Map<number, Waiter<PreviewDecode>>();
   const utterances = new Map<
     number,
     Waiter<{ ttfaMs: number; stopped: boolean }> & { onAudio: (pcm: Float32Array) => void }
@@ -65,8 +69,10 @@ export function startVoiceEngineProcess(
   const failAll = (error: Error) => {
     markReady.reject(error);
     for (const waiter of dictations.values()) waiter.reject(error);
+    for (const waiter of previews.values()) waiter.reject(error);
     for (const waiter of utterances.values()) waiter.reject(error);
     dictations.clear();
+    previews.clear();
     utterances.clear();
   };
 
@@ -82,6 +88,10 @@ export function startVoiceEngineProcess(
         dictations.get(event.id)?.resolve(event.result);
         dictations.delete(event.id);
         break;
+      case "previewed":
+        previews.get(event.id)?.resolve(event.result);
+        previews.delete(event.id);
+        break;
       case "audio":
         utterances.get(event.id)?.onAudio(event.pcm);
         break;
@@ -92,8 +102,10 @@ export function startVoiceEngineProcess(
       case "error": {
         const error = new Error(event.message);
         dictations.get(event.id)?.reject(error);
+        previews.get(event.id)?.reject(error);
         utterances.get(event.id)?.reject(error);
         dictations.delete(event.id);
+        previews.delete(event.id);
         utterances.delete(event.id);
         break;
       }
@@ -114,6 +126,14 @@ export function startVoiceEngineProcess(
         dictations.set(id, { resolve, reject });
       });
       request({ type: "dictate", id, samples, sampleRate, cleanup });
+      return result;
+    },
+    preview: (samples, sampleRate) => {
+      const id = nextId++;
+      const result = new Promise<PreviewDecode>((resolve, reject) => {
+        previews.set(id, { resolve, reject });
+      });
+      request({ type: "preview", id, samples, sampleRate });
       return result;
     },
     speak: (text, onAudio) => {

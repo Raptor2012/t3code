@@ -24,6 +24,12 @@ describe("ReplyReader", () => {
     expect(reader.next("m", "I found it. Fixing now. Done", true)).toBe("Done");
   });
 
+  it("never rereads a finished reply when it is reported again", () => {
+    const reader = new ReplyReader();
+    expect(reader.next("m", "All done here.", true)).toBe("All done here.");
+    expect(reader.next("m", "All done here.", true)).toBe("");
+  });
+
   it("never reads a half-open code fence", () => {
     const reader = new ReplyReader();
     expect(reader.next("m", "Here is the change. \n``", false)).toBe("");

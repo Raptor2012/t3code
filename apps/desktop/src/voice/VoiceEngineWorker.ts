@@ -96,6 +96,19 @@ async function dictate(request: Extract<VoiceEngineRequest, { type: "dictate" }>
   }
 }
 
+async function preview(request: Extract<VoiceEngineRequest, { type: "preview" }>) {
+  if (!stt) {
+    send({ type: "error", id: request.id, message: "The voice engine is not ready." });
+    return;
+  }
+  try {
+    const result = await stt.decode(request.samples, request.sampleRate);
+    send({ type: "previewed", id: request.id, result });
+  } catch (error) {
+    send({ type: "error", id: request.id, message: (error as Error).message });
+  }
+}
+
 function speak(request: Extract<VoiceEngineRequest, { type: "speak" }>) {
   if (!speech) {
     send({ type: "error", id: request.id, message: "The voice engine is not ready." });
@@ -119,6 +132,9 @@ process.on("message", (request: VoiceEngineRequest) => {
       break;
     case "dictate":
       void dictate(request);
+      break;
+    case "preview":
+      void preview(request);
       break;
     case "speak":
       speak(request);

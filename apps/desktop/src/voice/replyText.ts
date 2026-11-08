@@ -73,7 +73,10 @@ export class ReplyReader {
     if (!chunk) return "";
     const end = prose.indexOf(chunk, prefix.length) + chunk.length;
     this.spoken.set(messageId, prose.slice(0, end));
-    if (final) this.spoken.delete(messageId);
+    if (final) {
+      this.spoken.delete(messageId);
+      this.silenced.add(messageId);
+    }
     return chunk;
   }
 

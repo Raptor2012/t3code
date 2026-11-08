@@ -110,6 +110,22 @@ registerProcessor("voice-playback", class extends AudioWorkletProcessor {
 const workletUrl = (source: string) =>
   URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
 
+interface Playback {
+  readonly context: AudioContext;
+  readonly node: AudioWorkletNode;
+  readonly analyser: AnalyserNode;
+}
+
+function joinChunks(chunks: readonly Float32Array[]): Float32Array {
+  const joined = new Float32Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return joined;
+}
+
 class OrbAudio {
   private capture:
     | {
@@ -121,10 +137,11 @@ class OrbAudio {
       }
     | undefined;
   private recording: Float32Array[] | undefined;
+  private forwarded = 0;
+  private previewTimer: ReturnType<typeof setInterval> | undefined;
   private captureIdle: ReturnType<typeof setTimeout> | undefined;
-  private playback:
-    | { context: AudioContext; node: AudioWorkletNode; analyser: AnalyserNode }
-    | undefined;
+  private playback: Playback | undefined;
+  private openingPlayback: Promise<Playback> | undefined;
   private played = new Map<number, number>();
   private readonly frequency = new Float32Array(256);
   private readonly time = new Float32Array(512);
@@ -135,6 +152,8 @@ class OrbAudio {
   async startRecording(): Promise<void> {
     if (this.captureIdle) clearTimeout(this.captureIdle);
     this.recording = [];
+    this.forwarded = 0;
+    this.previewTimer = setInterval(() => this.forwardPreview(), 100);
     const capture = await this.ensureCapture();
     if (capture.context.state === "suspended") await capture.context.resume();
   }
@@ -142,16 +161,20 @@ class OrbAudio {
   stopRecording(): Float32Array {
     const chunks = this.recording ?? [];
     this.recording = undefined;
+    if (this.previewTimer) clearInterval(this.previewTimer);
     // Keep the microphone open briefly so a quick follow-up starts without the device warm-up.
     this.captureIdle = setTimeout(() => this.closeCapture(), 30_000);
-    const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-    const samples = new Float32Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      samples.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return samples;
+    return joinChunks(chunks);
+  }
+
+  private forwardPreview() {
+    const chunks = this.recording;
+    if (!chunks || chunks.length === this.forwarded) return;
+    const samples = joinChunks(chunks.slice(this.forwarded));
+    this.forwarded = chunks.length;
+    let sum = 0;
+    for (const sample of samples) sum += sample * sample;
+    ipcRenderer.send("voice-orb:preview-audio", samples, Math.sqrt(sum / samples.length) > 0.004);
   }
 
   async play(id: number, pcm: Float32Array): Promise<void> {
@@ -235,8 +258,16 @@ class OrbAudio {
     this.capture = undefined;
   }
 
-  private async ensurePlayback() {
-    if (this.playback) return this.playback;
+  // Maeve's first audio arrives in a burst; every chunk must wait on the one player being opened.
+  private ensurePlayback(): Promise<Playback> {
+    this.openingPlayback ??= this.openPlayback().catch((error: Error) => {
+      this.openingPlayback = undefined;
+      throw error;
+    });
+    return this.openingPlayback;
+  }
+
+  private async openPlayback(): Promise<Playback> {
     const context = new AudioContext({ sampleRate: 24000, latencyHint: "interactive" });
     await context.audioWorklet.addModule(workletUrl(PLAYBACK_WORKLET));
     const node = new AudioWorkletNode(context, "voice-playback", { outputChannelCount: [1] });
@@ -249,6 +280,7 @@ class OrbAudio {
     };
     const sink = context as AudioContext & { setSinkId?: (id: string) => Promise<void> };
     if (this.speakerDevice) await sink.setSinkId?.(this.speakerDevice).catch(() => undefined);
+    if (context.state === "suspended") void context.resume();
     this.playback = { context, node, analyser };
     return this.playback;
   }
@@ -315,7 +347,9 @@ ipcRenderer.on("voice-orb:record-stop", () => {
   ipcRenderer.send("voice-orb:recorded", { samples, sampleRate: 16000 });
 });
 ipcRenderer.on("voice-orb:audio", (_event, chunk: { id: number; pcm: Float32Array }) => {
-  void audio.play(chunk.id, chunk.pcm);
+  audio.play(chunk.id, chunk.pcm).catch((error: Error) => {
+    ipcRenderer.send("voice-orb:playback-failed", error.message);
+  });
 });
 ipcRenderer.on("voice-orb:flush", () => audio.flush());
 
