@@ -146,7 +146,7 @@ import { buildThreadRouteParams } from "../threadRoutes";
 import { useTheme } from "../hooks/useTheme";
 import { copyThreadReference } from "../lib/copyThreadReference";
 import { subscribeSnapShotComposerFocus } from "../lib/desktopSnapShot";
-import { composeDictatedPrompt, subscribeVoiceDictation, userDraftText } from "../lib/desktopVoice";
+import { composeDictatedPrompt, subscribeVoiceDictation } from "../lib/desktopVoice";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { FileMetadataThreadProvider } from "../hooks/FileMetadataThreadProvider";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
@@ -1845,13 +1845,8 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
       request.handled = true;
-      const current = composer.readSnapshot().value;
-      // Never send over, or discard, text the user typed themselves.
-      const submit = request.submit && userDraftText(current, request.replaces) === "";
-      request.heldForDraft = request.submit && !submit;
       composer.setVoiceText(
-        submit ? request.text : composeDictatedPrompt(current, request.text, request.replaces),
-        submit,
+        composeDictatedPrompt(composer.readSnapshot().value, request.text, request.replaces),
       );
     },
   );

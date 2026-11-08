@@ -5,18 +5,28 @@ import type {
   DesktopVoiceThread,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import { useEffect, useRef } from "react";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import * as DateTime from "effect/DateTime";
+import { useEffect, useState } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useHandleNewThread } from "../../hooks/useHandleNewThread";
 import { useStableCallback } from "../../hooks/useStableCallback";
-import { composeDictatedPrompt, dispatchVoiceDictation } from "../../lib/desktopVoice";
+import {
+  composeDictatedPrompt,
+  dispatchVoiceDictation,
+  focusedTextField,
+  ReplyOpenGate,
+} from "../../lib/desktopVoice";
+import { newMessageId } from "../../lib/utils";
 import {
   useAssistantMessageText,
   useThreadShell,
   useThreadVisibleTurnItems,
   useVisibleThreadShells,
 } from "../../state/entities";
+import { threadEnvironment } from "../../state/threads";
+import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 
 const MAX_THREADS = 40;
 
@@ -78,34 +88,55 @@ function VoiceCoordinatorWithBridge({ bridge }: { bridge: DesktopVoiceBridge }) 
     if (routeThreadRef) bridge.reportActivity(routeThreadRef, activity);
   }, [bridge, routeThreadRef, activity]);
 
-  const deliver = useStableCallback((delivery: DesktopVoiceDelivery) => {
+  const startTurn = useOrchestrationCommand(threadEnvironment.startTurn, { reportFailure: false });
+
+  // Open composer if the thread is showing, otherwise that thread's saved draft.
+  const writeComposer = (delivery: DesktopVoiceDelivery, text: string) => {
+    const { environmentId, threadId, replaces } = delivery;
+    if (dispatchVoiceDictation({ environmentId, threadId, text, replaces }).handled) return true;
+    const ref = { environmentId, threadId } as ScopedThreadRef;
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(
+      ref,
+      composeDictatedPrompt(store.getComposerDraft(ref)?.prompt ?? "", text, replaces),
+    );
+    return false;
+  };
+
+  const placeDictation = (delivery: DesktopVoiceDelivery) => {
+    const field = focusedTextField();
+    const inComposer = field?.closest("[data-chat-composer-form]") != null;
+    if (field && !inComposer && document.execCommand("insertText", false, delivery.text)) return;
+    writeComposer(delivery, delivery.text);
+  };
+
+  // Sends straight to the thread, like any agent message: it never depends on the thread being
+  // open, on what the composer holds, or on the window being visible.
+  const sendDictation = async (delivery: DesktopVoiceDelivery) => {
+    const shell = shells.find(
+      (candidate) =>
+        candidate.environmentId === delivery.environmentId && candidate.id === delivery.threadId,
+    );
+    if (!shell) throw new Error("That thread is no longer available.");
+    const result = await startTurn({
+      environmentId: shell.environmentId,
+      input: {
+        threadId: shell.id,
+        message: { messageId: newMessageId(), role: "user", text: delivery.text, attachments: [] },
+        runtimeMode: shell.runtimeMode,
+        interactionMode: shell.interactionMode,
+        createdAt: new Date().toISOString(),
+      },
+    });
+    if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+  };
+
+  const deliver = useStableCallback(async (delivery: DesktopVoiceDelivery) => {
     try {
-      const taken = dispatchVoiceDictation({
-        environmentId: delivery.environmentId,
-        threadId: delivery.threadId,
-        text: delivery.text,
-        submit: delivery.mode === "send",
-        replaces: delivery.replaces,
-      });
-      if (taken.handled) {
-        bridge.completeDelivery(
-          delivery.id,
-          taken.heldForDraft ? "Kept in the composer beside your unsent draft." : undefined,
-        );
-        return;
-      }
-      // The thread is not open: leave the dictation in its composer draft.
-      const ref = {
-        environmentId: delivery.environmentId,
-        threadId: delivery.threadId,
-      } as ScopedThreadRef;
-      const store = useComposerDraftStore.getState();
-      const current = store.getComposerDraft(ref)?.prompt ?? "";
-      store.setPrompt(ref, composeDictatedPrompt(current, delivery.text, delivery.replaces));
-      bridge.completeDelivery(
-        delivery.id,
-        delivery.mode === "send" ? "Saved to the thread's composer; open it to send." : undefined,
-      );
+      if (delivery.mode === "send") await sendDictation(delivery);
+      else placeDictation(delivery);
+      bridge.completeDelivery(delivery.id, undefined);
+      if (delivery.mode === "send" && delivery.replaces) writeComposer(delivery, "");
     } catch (error) {
       bridge.completeDelivery(delivery.id, error instanceof Error ? error.message : String(error));
     }
@@ -132,13 +163,19 @@ function ReplyReporter({
 }) {
   const items = useThreadVisibleTurnItems(threadRef);
   const latest = latestAssistantReply(items);
-  // A reply already finished when the thread opened is history, never read aloud.
-  const finishedAtOpen = useRef(latest && !latest.streaming ? latest.messageId : null);
+  const [gate] = useState(() => new ReplyOpenGate(Date.now()));
+  const hasItems = items.length > 0;
   const liveText = useAssistantMessageText(latest?.streaming ? threadRef : null, latest?.id);
   const text = liveText ?? latest?.text ?? "";
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- streams reply text to the desktop voice engine, outside React
   useEffect(() => {
-    if (!latest || !text || latest.messageId === finishedAtOpen.current) return;
+    const live = gate.allows(
+      hasItems,
+      latest
+        ? { messageId: latest.messageId, updatedAtMs: DateTime.toEpochMillis(latest.updatedAt) }
+        : null,
+    );
+    if (!latest || !text || !live) return;
     bridge.reportReply({
       environmentId: threadRef.environmentId,
       threadId: threadRef.threadId,
@@ -146,7 +183,7 @@ function ReplyReporter({
       text,
       final: !latest.streaming,
     });
-  }, [bridge, threadRef, latest, text]);
+  }, [bridge, threadRef, latest, text, gate, hasItems]);
   return null;
 }
 

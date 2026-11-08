@@ -26,6 +26,7 @@ const LINGER_MS = 1200;
 const FADE_MS = 500;
 const MIN_DICTATION_SAMPLES = 16000 * 0.25;
 const TICK_MS = 33;
+const DRAG_HOLD_MS = 600;
 
 type Delivery = "immediate" | "review" | "composer";
 type DictState = "" | "dictating" | "processing" | "done" | "failed";
@@ -154,6 +155,8 @@ export class VoiceController {
   private clickThrough: boolean | undefined;
   private dragGesture = 0;
   private dragOrigin: [number, number] | undefined;
+  private dragUntil = 0;
+  private dragMoves = 0;
 
   private readonly options: VoiceControllerOptions;
 
@@ -318,7 +321,7 @@ export class VoiceController {
       }
       this.dictPreviewText = result.text;
       this.dictPreviewUntil = Date.now() + 4000;
-      await this.deliverDictation(result.text);
+      await this.deliverDictation(session, result.text);
     } catch (error) {
       this.failDictation((error as Error).message);
     }
@@ -330,7 +333,7 @@ export class VoiceController {
     this.dictUntil = Date.now() + 4000;
   }
 
-  private async deliverDictation(text: string) {
+  private async deliverDictation(session: number, text: string) {
     const target = this.target;
     if (!target) {
       this.failDictation("Open a thread in T3 Code first.");
@@ -338,6 +341,11 @@ export class VoiceController {
     }
     const delivery = this.prefs.delivery ?? "review";
     if (delivery === "review") {
+      // Lands in the field you were typing in first, while T3 still has the keyboard.
+      await this.deliver(target, text, "composer").catch((error: Error) =>
+        this.options.log("voice dictation not placed", { error: error.message }),
+      );
+      if (session !== this.dictSession) return;
       this.review = {
         id: ++this.reviewSeq,
         text,
@@ -380,7 +388,7 @@ export class VoiceController {
       const timeout = setTimeout(() => {
         this.deliveries.delete(id);
         reject(new Error("T3 Code did not take the dictation."));
-      }, 10_000);
+      }, 30_000);
       this.deliveries.set(id, (error) => {
         clearTimeout(timeout);
         if (error) reject(new Error(error));
@@ -410,6 +418,7 @@ export class VoiceController {
         this.setFocus(false);
       },
       (error: Error) => {
+        this.options.log("voice send failed", { error: error.message });
         if (this.review?.id !== id) return;
         this.review.sending = false;
         this.review.error = error.message;
@@ -731,6 +740,7 @@ export class VoiceController {
       this.setState(this.idleState());
     }
     this.watchCard(now);
+    this.finishDrag(now);
     this.runPreview(now);
     // A thread opened during a dictation, review or reply was deferred; catch up once it ends.
     if (
@@ -765,7 +775,8 @@ export class VoiceController {
   private updateClickThrough() {
     const window = this.window;
     if (!window || !window.isVisible()) return;
-    const through = !this.cursorInside();
+    // While dragging the window lags the cursor; going click-through then would drop the drag.
+    const through = Date.now() >= this.dragUntil && !this.cursorInside();
     if (through === this.clickThrough) return;
     window.setIgnoreMouseEvents(through, { forward: true });
     this.clickThrough = through;
@@ -813,8 +824,16 @@ export class VoiceController {
     }
     if (!this.dragOrigin) return;
     this.pinUntil = Date.now() + LINGER_MS;
-    const anchor: [number, number] = [this.dragOrigin[0] + dx, this.dragOrigin[1] + dy];
-    this.place(anchor);
+    this.dragUntil = Date.now() + DRAG_HOLD_MS;
+    this.dragMoves++;
+    this.place([this.dragOrigin[0] + dx, this.dragOrigin[1] + dy]);
+  }
+
+  // Saved once the drag ends, so disk writes never compete with the drag or Maeve's audio.
+  private finishDrag(now: number) {
+    if (this.dragMoves === 0 || now < this.dragUntil) return;
+    this.options.log("voice orb moved", { moves: this.dragMoves });
+    this.dragMoves = 0;
     this.setPrefs({ anchor: this.anchor() });
   }
 

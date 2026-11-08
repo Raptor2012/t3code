@@ -2540,7 +2540,7 @@
         draggingOrb = false;
         orbPressed = false;
       }
-      for (const surface of [cv, wave]) {
+      for (const surface of [cv, wave, bubbleEl]) {
         surface.addEventListener("pointerdown", beginOrbGesture);
         surface.addEventListener("pointermove", moveOrbGesture);
         surface.addEventListener("pointerup", endOrbGesture);

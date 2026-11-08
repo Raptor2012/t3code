@@ -297,7 +297,7 @@ export interface ChatComposerHandle {
   ) => boolean;
   pasteTextAtEnd: (text: string, options?: { bypassAutoAttachment?: boolean }) => boolean;
   /** Replaces the prompt with dictated text and, with `submit`, sends it as Enter would. */
-  setVoiceText: (text: string, submit: boolean) => void;
+  setVoiceText: (text: string) => void;
   citeAssistantText: (
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
@@ -2823,18 +2823,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsComposerModelPickerOpen(true);
   };
   const openModelPickerStable = useStableCallback(openModelPicker);
-  const setVoiceText = (text: string, submit: boolean) => {
+  const setVoiceText = (text: string) => {
     promptRef.current = text;
     setComposerDraftPrompt(composerDraftTarget, text);
     const cursor = collapseExpandedComposerCursor(text, text.length);
     setComposerCursor(cursor);
     setComposerTrigger(detectComposerTrigger(text, text.length));
-    // Send-state derives from the rendered prompt, so submit after the new text renders.
-    if (submit) {
-      window.requestAnimationFrame(() =>
-        window.requestAnimationFrame(() => submitComposerStable()),
-      );
-    }
   };
   const setVoiceTextStable = useStableCallback(setVoiceText);
 
