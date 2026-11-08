@@ -29,7 +29,7 @@ const TICK_MS = 33;
 const DRAG_HOLD_MS = 600;
 const LEAVE_T3_MS = 300;
 // Above the message box at the window's right, clear of Send.
-const DEFAULT_T3_SPOT: [number, number] = [110, 120];
+const DEFAULT_T3_SPOT: [number, number] = [178, 120];
 
 type Delivery = "immediate" | "review" | "composer";
 type DictState = "" | "dictating" | "processing" | "done" | "failed";
@@ -722,9 +722,10 @@ export class VoiceController {
       y: Math.round(bottom) - 20,
     });
     const area = display.workArea;
+    // The whole surface stays on screen: the cards span its full width.
     const x = Math.max(
-      area.x - SURFACE.width / 2 + 90,
-      Math.min(cx - SURFACE.width / 2, area.x + area.width - SURFACE.width / 2 - 90),
+      area.x,
+      Math.min(cx - SURFACE.width / 2, area.x + area.width - SURFACE.width),
     );
     const y = Math.max(
       area.y,
@@ -739,7 +740,10 @@ export class VoiceController {
     const right = content.x + content.width;
     const bottom = content.y + content.height;
     return [
-      Math.max(content.x + 90, right - fromRight),
+      Math.max(
+        content.x + SURFACE.width / 2,
+        Math.min(right - SURFACE.width / 2 - 8, right - fromRight),
+      ),
       Math.max(content.y + 150, Math.min(bottom, bottom - fromBottom)),
     ];
   }
