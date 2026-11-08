@@ -126,6 +126,7 @@ import { composerCodeBlockHighlight } from "./composerCodeBlockHighlight";
 import { importPastedComposerText } from "./composerInlineTokenPaste";
 import { didComposerSelectionChangeVisibly } from "./composerSelection";
 import type { ComposerDraftContextRecords } from "./composerContextPresentation";
+import { minimalTextEdit } from "../lib/desktopVoice";
 
 export interface ComposerPromptEditorHandle {
   focus: () => void;
@@ -140,6 +141,8 @@ export interface ComposerPromptEditorHandle {
     contextIds: string[];
   };
   isCaretOnVisualEdge: (edge: "start" | "end") => boolean;
+  /** Changes only the characters that differ, so the box does not rebuild; false if it cannot. */
+  replaceTextInPlace: (next: string) => boolean;
 }
 
 export interface ComposerPromptEditorProps {
@@ -1674,6 +1677,39 @@ function ComposerPromptEditorTiptapInner(
                 snapshotRef.current.value.length,
               ),
         );
+      },
+      replaceTextInPlace: (next) => {
+        if (!editor) return false;
+        const map = serializeEditorDoc(editor.state.doc);
+        const edit = minimalTextEdit(map.value, next);
+        if (edit.insert.includes("\n")) return false;
+        const from = flatToPm(map, markdownToFlat(map, edit.start));
+        const to = flatToPm(map, markdownToFlat(map, edit.end));
+        const tr = editor.state.tr;
+        if (edit.insert) tr.insertText(edit.insert, from, to);
+        else tr.delete(from, to);
+        // Markdown in the new words would serialize differently; let the full path handle it.
+        if (serializeEditorDoc(tr.doc).value !== next) return false;
+        tr.setMeta("addToHistory", false);
+        latestValueRef.current = next;
+        snapshotRef.current = {
+          value: next,
+          cursor: clampEditorCursor(
+            next,
+            collapseExpandedComposerCursor(next, next.length, literalText),
+          ),
+          expandedCursor: next.length,
+          contextIds: collectInlineContextIds(next),
+        };
+        selectionRangeRef.current = { start: next.length, end: next.length };
+        setIsEmpty(next.length === 0);
+        isApplyingControlledUpdateRef.current = true;
+        editor.view.dispatch(tr);
+        if (document.activeElement === editor.view.dom) scrollTiptapCaretIntoView(editor);
+        queueMicrotask(() => {
+          isApplyingControlledUpdateRef.current = false;
+        });
+        return true;
       },
       readSelectionRange: () => {
         readSnapshot();

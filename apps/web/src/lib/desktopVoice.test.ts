@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { composeDictatedPrompt, ReplyOpenGate } from "./desktopVoice";
+import { composeDictatedPrompt, minimalTextEdit, ReplyOpenGate } from "./desktopVoice";
 
 describe("composeDictatedPrompt", () => {
   it.each([
@@ -12,6 +12,19 @@ describe("composeDictatedPrompt", () => {
     ["edited by hand", "", "old take", "edited by hand"],
   ])("%j + %j replacing %j is %j", (current, text, replaces, expected) => {
     expect(composeDictatedPrompt(current, text, replaces)).toBe(expected);
+  });
+});
+
+describe("minimalTextEdit", () => {
+  it.each([
+    ["", "hello", { start: 0, end: 0, insert: "hello" }],
+    ["hello", "hello there", { start: 5, end: 5, insert: " there" }],
+    ["hello there friend", "hello their friend", { start: 9, end: 11, insert: "ir" }],
+    ["hello there", "hello", { start: 5, end: 11, insert: "" }],
+    ["aaa", "aaaa", { start: 3, end: 3, insert: "a" }],
+    ["same", "same", { start: 4, end: 4, insert: "" }],
+  ])("%j to %j", (previous, next, expected) => {
+    expect(minimalTextEdit(previous, next)).toEqual(expected);
   });
 });
 

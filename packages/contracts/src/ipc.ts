@@ -1029,11 +1029,25 @@ export interface DesktopVoiceThread {
 }
 
 /** A finished dictation for a thread: placed in its composer, or sent as the next message. */
-/** In page coordinates: the model name's left edge and vertical center, and the message box's top. */
+/** In page coordinates: the message box's horizontal center and top edge. */
 export interface DesktopVoiceDock {
   readonly x: number;
-  readonly y: number;
   readonly top: number;
+}
+
+export type DesktopVoiceCommand =
+  | "toggle-dictation"
+  | "start-conversation"
+  | "end-conversation"
+  | "toggle-mic"
+  | "toggle-output";
+
+export interface DesktopVoiceState {
+  /** A hands-free conversation is running. */
+  readonly conversation: boolean;
+  readonly dictating: boolean;
+  readonly micMuted: boolean;
+  readonly outputMuted: boolean;
 }
 
 export interface DesktopVoiceDelivery {
@@ -1041,7 +1055,8 @@ export interface DesktopVoiceDelivery {
   readonly environmentId: string;
   readonly threadId: string;
   readonly text: string;
-  readonly mode: "composer" | "send";
+  /** `live` is words shown while the dictation key is held; the final text replaces them. */
+  readonly mode: "composer" | "send" | "live";
   /** An earlier unsent dictation in the composer that this one replaces. */
   readonly replaces?: string | undefined;
 }
@@ -1071,6 +1086,9 @@ export interface DesktopVoiceBridge {
   readonly completeDelivery: (id: number, error?: string) => void;
   /** Where the orb docks in the page, or null when no message box is showing. */
   readonly reportDock: (dock: DesktopVoiceDock | null) => void;
+  /** Calls back with the current state at once if known, then on each change. */
+  readonly onState: (listener: (state: DesktopVoiceState) => void) => () => void;
+  readonly command: (command: DesktopVoiceCommand) => void;
   /** A user message reached this thread, however it was sent. */
   readonly reportUserMessage: (
     thread: Pick<DesktopVoiceThread, "environmentId" | "threadId">,

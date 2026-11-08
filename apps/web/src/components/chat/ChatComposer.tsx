@@ -203,6 +203,7 @@ import {
 } from "./ComposerAttachmentStrip";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerFooterPrimaryActions } from "./ComposerFooterControls";
+import { VoiceControls } from "../desktop/VoiceControls";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
@@ -2824,6 +2825,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   };
   const openModelPickerStable = useStableCallback(openModelPicker);
   const setVoiceText = (text: string) => {
+    composerEditorRef.current?.replaceTextInPlace(text);
     promptRef.current = text;
     setComposerDraftPrompt(composerDraftTarget, text);
     const cursor = collapseExpandedComposerCursor(text, text.length);
@@ -3508,6 +3510,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   >
                     {composerControls}
                   </div>
+                  <VoiceControls />
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
                     canOperateThread={canOperateThread}

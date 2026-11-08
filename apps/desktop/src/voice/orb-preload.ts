@@ -33,6 +33,11 @@ const ORB_ACTIONS = [
 ] as const;
 
 const BANDS = 11;
+const VAD_MIN_LEVEL = 0.012;
+const VAD_OVER_NOISE = 3;
+const VAD_START_MS = 120;
+const VAD_END_SILENCE_MS = 900;
+const VAD_PRE_ROLL_MS = 400;
 
 // Eleven speech bands from 100 Hz to 6 kHz on a log scale, mapped like the standalone orb's
 // numpy version: (dB + 72) / 42, clipped to 0..1.
@@ -138,6 +143,12 @@ class OrbAudio {
     | undefined;
   private recording: Float32Array[] | undefined;
   private forwarded = 0;
+  private listening = false;
+  private preRoll: Float32Array[] = [];
+  private inSpeech = false;
+  private voicedMs = 0;
+  private silentMs = 0;
+  private noiseFloor = 0.003;
   private previewTimer: ReturnType<typeof setInterval> | undefined;
   private captureIdle: ReturnType<typeof setTimeout> | undefined;
   private playback: Playback | undefined;
@@ -151,7 +162,7 @@ class OrbAudio {
 
   async startRecording(): Promise<void> {
     if (this.captureIdle) clearTimeout(this.captureIdle);
-    this.recording = [];
+    this.recording ??= [];
     this.forwarded = 0;
     this.previewTimer = setInterval(() => this.forwardPreview(), 100);
     const capture = await this.ensureCapture();
@@ -163,8 +174,52 @@ class OrbAudio {
     this.recording = undefined;
     if (this.previewTimer) clearInterval(this.previewTimer);
     // Keep the microphone open briefly so a quick follow-up starts without the device warm-up.
-    this.captureIdle = setTimeout(() => this.closeCapture(), 30_000);
+    if (!this.listening) this.captureIdle = setTimeout(() => this.closeCapture(), 30_000);
     return joinChunks(chunks);
+  }
+
+  // Hands-free: watches the microphone and reports where speech starts and ends.
+  async listen(on: boolean): Promise<void> {
+    this.listening = on;
+    this.preRoll = [];
+    this.voicedMs = 0;
+    this.silentMs = 0;
+    this.inSpeech = false;
+    if (!on) {
+      this.captureIdle = setTimeout(() => this.closeCapture(), 30_000);
+      return;
+    }
+    if (this.captureIdle) clearTimeout(this.captureIdle);
+    const capture = await this.ensureCapture();
+    if (capture.context.state === "suspended") await capture.context.resume();
+  }
+
+  private detectSpeech(chunk: Float32Array) {
+    if (!this.listening) return;
+    let sum = 0;
+    for (const sample of chunk) sum += sample * sample;
+    const level = Math.sqrt(sum / chunk.length);
+    const chunkMs = (chunk.length / 16000) * 1000;
+    const voiced = level > Math.max(VAD_MIN_LEVEL, this.noiseFloor * VAD_OVER_NOISE);
+    if (!voiced) this.noiseFloor += (level - this.noiseFloor) * 0.02;
+    if (this.inSpeech) {
+      this.silentMs = voiced ? 0 : this.silentMs + chunkMs;
+      if (this.silentMs < VAD_END_SILENCE_MS) return;
+      this.inSpeech = false;
+      this.silentMs = 0;
+      this.voicedMs = 0;
+      ipcRenderer.send("voice-orb:vad", "end");
+      return;
+    }
+    this.preRoll.push(chunk);
+    if (this.preRoll.length * chunkMs > VAD_PRE_ROLL_MS) this.preRoll.shift();
+    this.voicedMs = voiced ? this.voicedMs + chunkMs : Math.max(0, this.voicedMs - chunkMs / 2);
+    if (this.voicedMs < VAD_START_MS) return;
+    this.inSpeech = true;
+    // Keeps the words that were spoken before speech was confirmed.
+    this.recording = this.preRoll;
+    this.preRoll = [];
+    ipcRenderer.send("voice-orb:vad", "start");
   }
 
   private forwardPreview() {
@@ -242,7 +297,10 @@ class OrbAudio {
     const node = new AudioWorkletNode(context, "voice-capture");
     const analyser = context.createAnalyser();
     analyser.fftSize = 512;
-    node.port.onmessage = ({ data }: MessageEvent<Float32Array>) => this.recording?.push(data);
+    node.port.onmessage = ({ data }: MessageEvent<Float32Array>) => {
+      this.recording?.push(data);
+      this.detectSpeech(data);
+    };
     source.connect(node);
     source.connect(analyser);
     // A worklet only runs while connected to the graph's output; it writes silence there.
@@ -352,6 +410,11 @@ ipcRenderer.on("voice-orb:audio", (_event, chunk: { id: number; pcm: Float32Arra
   });
 });
 ipcRenderer.on("voice-orb:flush", () => audio.flush());
+ipcRenderer.on("voice-orb:listen", (_event, on: boolean) => {
+  audio.listen(on).catch((error: Error) => {
+    ipcRenderer.send("voice-orb:recorded", { error: error.message });
+  });
+});
 
 window.addEventListener("DOMContentLoaded", () => {
   window.dispatchEvent(new Event("pywebviewready"));

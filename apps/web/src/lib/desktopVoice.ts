@@ -41,20 +41,28 @@ export function subscribeVoiceDictation(
   return () => window.removeEventListener(VOICE_DICTATION_EVENT, wrapped);
 }
 
-/** Where the orb should dock: just left of the message box's first footer control, the model name. */
+/** Where the orb should dock: centered on the message box, just above it. */
 export function measureVoiceDock(): DesktopVoiceDock | null {
   const form = document.querySelector("[data-chat-composer-form]");
-  const controls = document.querySelector("[data-chat-composer-footer-controls]");
-  if (!form || !controls) return null;
-  const model = [...controls.children]
-    .map((child) => child.getBoundingClientRect())
-    .find((rect) => rect.width > 0);
-  if (!model) return null;
-  return {
-    x: Math.round(model.left),
-    y: Math.round(model.top + model.height / 2),
-    top: Math.round(form.getBoundingClientRect().top),
-  };
+  if (!form) return null;
+  const rect = form.getBoundingClientRect();
+  if (rect.width === 0) return null;
+  return { x: Math.round(rect.left + rect.width / 2), top: Math.round(rect.top) };
+}
+
+/** The smallest single replacement that turns `previous` into `next`. */
+export function minimalTextEdit(previous: string, next: string) {
+  let start = 0;
+  const shortest = Math.min(previous.length, next.length);
+  while (start < shortest && previous[start] === next[start]) start++;
+  let tail = 0;
+  while (
+    tail < shortest - start &&
+    previous[previous.length - 1 - tail] === next[next.length - 1 - tail]
+  ) {
+    tail++;
+  }
+  return { start, end: previous.length - tail, insert: next.slice(start, next.length - tail) };
 }
 
 export function focusedTextField(): HTMLElement | null {

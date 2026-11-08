@@ -6,6 +6,7 @@ import type {
   DesktopPreviewTabState,
   DesktopSnapShotEvent,
   DesktopVoiceDelivery,
+  DesktopVoiceState,
 } from "@t3tools/contracts";
 import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
@@ -72,6 +73,14 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
   }
   return result as Awaited<ReturnType<DesktopBridge["ensureSshEnvironment"]>>;
 }
+
+// Remembered here so a message box that mounts later still shows the voice state.
+let voiceState: DesktopVoiceState | undefined;
+const voiceStateListeners = new Set<(state: DesktopVoiceState) => void>();
+ipcRenderer.on(IpcChannels.VOICE_STATE_CHANNEL, (_event, state: DesktopVoiceState) => {
+  voiceState = state;
+  for (const listener of voiceStateListeners) listener(state);
+});
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getAppBranding: () => {
@@ -240,6 +249,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     completeDelivery: (id, error) =>
       ipcRenderer.send(IpcChannels.VOICE_DELIVERY_DONE_CHANNEL, id, error),
     reportDock: (dock) => ipcRenderer.send(IpcChannels.VOICE_DOCK_CHANNEL, dock),
+    onState: (listener) => {
+      voiceStateListeners.add(listener);
+      if (voiceState) listener(voiceState);
+      return () => {
+        voiceStateListeners.delete(listener);
+      };
+    },
+    command: (command) => ipcRenderer.send(IpcChannels.VOICE_COMMAND_CHANNEL, command),
     reportUserMessage: (thread) => ipcRenderer.send(IpcChannels.VOICE_USER_MESSAGE_CHANNEL, thread),
   },
   onSnapShotEvent: (listener) => {

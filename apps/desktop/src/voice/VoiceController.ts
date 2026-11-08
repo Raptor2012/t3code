@@ -6,8 +6,10 @@ import * as NodePath from "node:path";
 
 import type {
   DesktopVoiceActivity,
+  DesktopVoiceCommand,
   DesktopVoiceDelivery,
   DesktopVoiceDock,
+  DesktopVoiceState,
   DesktopVoiceReply,
   DesktopVoiceThread,
 } from "@t3tools/contracts";
@@ -29,9 +31,11 @@ const MIN_DICTATION_SAMPLES = 16000 * 0.25;
 const TICK_MS = 33;
 const DRAG_HOLD_MS = 600;
 const LEAVE_T3_MS = 300;
-// The docked orb: how far its center sits left of the model name and above the window's base.
-const DOCK_ORB_LEFT_OF_MODEL = 26;
-const DOCK_ORB_ABOVE_BASE = 20;
+// How far the orb's window base dips into the top of the message box.
+const DOCK_OVERLAP = 8;
+const LISTEN_RESUME_MS = 300;
+// A hands-free conversation ends by itself after this long with nobody talking.
+const CONVERSATION_IDLE_MS = 120_000;
 
 type Delivery = "immediate" | "review" | "composer";
 type DictState = "" | "dictating" | "processing" | "done" | "failed";
@@ -168,7 +172,12 @@ export class VoiceController {
   private home = "";
   private dock: DesktopVoiceDock | null = null;
   private docked = false;
-  private dockGap = 0;
+  private conversation = false;
+  private listening = false;
+  private lastHeardAt = 0;
+  private speechEndsAt = 0;
+  private pushedState = "";
+  private liveWords: Promise<unknown> | undefined;
 
   private readonly options: VoiceControllerOptions;
 
@@ -249,6 +258,7 @@ export class VoiceController {
   private voiceOn(): boolean {
     const target = this.target;
     if (!target) return false;
+    if (this.conversation) return true;
     if (this.prefs.followActive !== false && this.activeThread === null) return false;
     return Boolean(this.prefs.voiceThreads?.[threadKey(target)]);
   }
@@ -292,7 +302,11 @@ export class VoiceController {
     if (!engine || !request) return;
     const finish = (decode: PreviewDecode) => {
       const shown = this.preview.complete(request.session, decode);
-      if (shown && !this.review) this.dictPreviewText = shown.slice(-1200);
+      if (!shown || this.review) return;
+      this.dictPreviewText = shown.slice(-1200);
+      if (this.target && this.docked && !this.conversation) {
+        this.liveWords = this.deliver(this.target, shown, "live").catch(() => undefined);
+      }
     };
     engine
       .preview(request.samples, 16000)
@@ -351,8 +365,12 @@ export class VoiceController {
       this.failDictation("Open a thread in T3 Code first.");
       return;
     }
-    const delivery = this.prefs.delivery ?? "review";
-    if (delivery === "review") {
+    // The final text must replace the last live words, so it waits for them to land.
+    await this.liveWords;
+    this.liveWords = undefined;
+    if (session !== this.dictSession) return;
+    const delivery = this.conversation ? "immediate" : (this.prefs.delivery ?? "review");
+    if (delivery === "review" && !this.docked) {
       // Lands in the field you were typing in first, while T3 still has the keyboard.
       await this.deliver(target, text, "composer").catch((error: Error) =>
         this.options.log("voice dictation not placed", { error: error.message }),
@@ -380,7 +398,7 @@ export class VoiceController {
     }
   }
 
-  private deliver(target: DesktopVoiceThread, text: string, mode: "composer" | "send") {
+  private deliver(target: DesktopVoiceThread, text: string, mode: DesktopVoiceDelivery["mode"]) {
     const main = this.options.mainWindow();
     if (!main || main.isDestroyed()) {
       return Promise.reject(new Error("T3 Code's window is closed."));
@@ -405,7 +423,7 @@ export class VoiceController {
         clearTimeout(timeout);
         if (error) reject(new Error(error));
         else {
-          this.composerDraft = mode === "composer" ? { key, text } : undefined;
+          this.composerDraft = mode === "send" ? undefined : { key, text };
           if (mode === "send") {
             this.visualEvents.sent++;
             this.sentAt = Date.now();
@@ -561,6 +579,7 @@ export class VoiceController {
     const job = engine.speak(text, (pcm) => {
       if (this.speaking !== speaking) return;
       if (this.playback?.run === run) this.playback.total += pcm.length;
+      this.speechEndsAt = Math.max(Date.now(), this.speechEndsAt) + (pcm.length / 24000) * 1000;
       this.window?.webContents.send("voice-orb:audio", { id: run, pcm });
     });
     speaking.utterances.add(job.id);
@@ -587,6 +606,7 @@ export class VoiceController {
     if (this.speaking) this.reader.silence(this.speaking.message);
     this.speaking = undefined;
     this.playback = null;
+    this.speechEndsAt = 0;
     if (interrupt) this.visualEvents.interrupt++;
     this.setState(this.idleState());
   }
@@ -758,20 +778,93 @@ export class VoiceController {
     const zoom = main && content ? main.webContents.getZoomFactor() : 1;
     this.docked = content !== null;
     const home =
-      content && dock
-        ? `${content.x},${content.y},${dock.x},${dock.y},${dock.top},${zoom}`
-        : "float";
+      content && dock ? `${content.x},${content.y},${dock.x},${dock.top},${zoom}` : "float";
     if (home === this.home) return;
     this.home = home;
     if (!content || !dock) {
       this.place(this.prefs.anchor ?? this.defaultAnchor());
       return;
     }
-    this.dockGap = (dock.y - dock.top) * zoom + DOCK_ORB_ABOVE_BASE + 8;
-    this.place([
-      content.x + dock.x * zoom - DOCK_ORB_LEFT_OF_MODEL,
-      content.y + dock.y * zoom + DOCK_ORB_ABOVE_BASE,
-    ]);
+    this.place([content.x + dock.x * zoom, content.y + dock.top * zoom + DOCK_OVERLAP]);
+  }
+
+  private runCommand(command: DesktopVoiceCommand) {
+    switch (command) {
+      case "toggle-dictation":
+        if (this.recording) this.endDictation();
+        else void this.beginDictation();
+        break;
+      case "start-conversation":
+        if (!this.engine || !this.target) break;
+        this.conversation = true;
+        this.lastHeardAt = Date.now();
+        this.stopSpeech(false);
+        break;
+      case "end-conversation":
+        this.endConversation();
+        break;
+      case "toggle-mic":
+        this.setPrefs({ micMuted: !this.prefs.micMuted });
+        break;
+      case "toggle-output":
+        this.setPrefs({ maeveMuted: !this.prefs.maeveMuted });
+        if (this.prefs.maeveMuted) this.stopSpeech(false);
+        break;
+    }
+  }
+
+  private endConversation() {
+    this.conversation = false;
+    this.stopSpeech(true);
+    if (this.recording) {
+      this.recording = false;
+      this.dictSession++;
+      this.dictState = "";
+      this.preview.stop();
+      this.window?.webContents.send("voice-orb:record-stop");
+    }
+    this.setListening(false);
+  }
+
+  private setListening(on: boolean) {
+    if (on === this.listening) return;
+    this.listening = on;
+    this.window?.webContents.send("voice-orb:listen", on);
+  }
+
+  // Listens only while nothing else is happening, so the mic never hears the voice agent's own
+  // reply and a coding agent is never sent speech while it is working.
+  private runConversation(now: number) {
+    if (this.recording) return;
+    const listen =
+      this.conversation &&
+      !this.prefs.micMuted &&
+      !this.dictState &&
+      !this.speaking &&
+      now >= this.speechEndsAt + LISTEN_RESUME_MS &&
+      this.agentActivity === "" &&
+      this.state !== "waiting";
+    if (!listen) this.lastHeardAt = now;
+    else if (now - this.lastHeardAt > CONVERSATION_IDLE_MS) {
+      this.endConversation();
+      return;
+    }
+    this.setListening(listen);
+  }
+
+  private pushVoiceState() {
+    const main = this.options.mainWindow();
+    if (!main || main.isDestroyed()) return;
+    const state: DesktopVoiceState = {
+      conversation: this.conversation,
+      dictating: this.recording,
+      micMuted: Boolean(this.prefs.micMuted),
+      outputMuted: Boolean(this.prefs.maeveMuted),
+    };
+    const key = JSON.stringify(state);
+    if (key === this.pushedState) return;
+    this.pushedState = key;
+    main.webContents.send(IpcChannels.VOICE_STATE_CHANNEL, state);
   }
 
   // A message the user sent themselves from T3 settles the draft under review.
@@ -784,7 +877,16 @@ export class VoiceController {
   }
 
   private wantsVisible(now: number): boolean {
-    if (this.docked) return true;
+    if (this.docked) {
+      return Boolean(
+        this.conversation ||
+        this.expanded ||
+        this.review ||
+        this.dictState ||
+        this.speaking ||
+        now < this.speechEndsAt,
+      );
+    }
     if (this.agentActivity === "approval" || this.agentActivity === "input") return true;
     if (
       this.review ||
@@ -817,6 +919,8 @@ export class VoiceController {
     this.finishDrag(now);
     this.followT3(now);
     this.runPreview(now);
+    this.runConversation(now);
+    this.pushVoiceState();
     // A thread opened during a dictation, review or reply was deferred; catch up once it ends.
     if (
       this.prefs.followActive !== false &&
@@ -916,7 +1020,8 @@ export class VoiceController {
   }
 
   private dictationBubble(now: number) {
-    if (this.expanded || this.review) return null;
+    // While docked the words are in the message box itself.
+    if (this.docked || this.expanded || this.review) return null;
     const live = this.dictState === "dictating";
     const processing = this.dictState === "processing";
     if (live || processing || (this.dictPreviewText && now < this.dictPreviewUntil)) {
@@ -933,6 +1038,7 @@ export class VoiceController {
 
   private replyBubbleVisible(now: number): boolean {
     return Boolean(
+      !this.docked &&
       !this.expanded &&
       !this.review &&
       this.bubble &&
@@ -979,7 +1085,6 @@ export class VoiceController {
       followActive: following,
       expanded: this.expanded,
       docked: this.docked,
-      dockGap: this.dockGap,
       hovered: this.hovered,
       settingsCloseRequest: this.cardCloseAt ?? 0,
       viewportTarget: [SURFACE.width, SURFACE.height],
@@ -1036,6 +1141,21 @@ export class VoiceController {
     Electron.ipcMain.on("voice-orb:playback-failed", (event, message: string) => {
       if (fromOrb(event)) this.options.log("voice playback failed", { error: String(message) });
     });
+    Electron.ipcMain.on("voice-orb:vad", (event, edge: "start" | "end") => {
+      if (!fromOrb(event) || !this.conversation) return;
+      if (edge === "start") {
+        this.lastHeardAt = Date.now();
+        void this.beginDictation();
+      } else {
+        this.endDictation();
+      }
+    });
+    Electron.ipcMain.on(
+      IpcChannels.VOICE_COMMAND_CHANNEL,
+      (event, command: DesktopVoiceCommand) => {
+        if (fromMain(event)) this.runCommand(command);
+      },
+    );
     Electron.ipcMain.on(IpcChannels.VOICE_DOCK_CHANNEL, (event, dock: DesktopVoiceDock | null) => {
       if (fromMain(event)) this.dock = dock;
     });
@@ -1048,7 +1168,10 @@ export class VoiceController {
     Electron.ipcMain.on(
       IpcChannels.VOICE_THREADS_CHANNEL,
       (event, threads: DesktopVoiceThread[], active: DesktopVoiceThread | null) => {
-        if (fromMain(event) && Array.isArray(threads)) this.onThreads(threads, active);
+        if (!fromMain(event) || !Array.isArray(threads)) return;
+        this.onThreads(threads, active);
+        // A reloaded page has lost the controls' state; the next tick resends it.
+        this.pushedState = "";
       },
     );
     Electron.ipcMain.on(IpcChannels.VOICE_REPLY_CHANNEL, (event, reply: DesktopVoiceReply) => {
