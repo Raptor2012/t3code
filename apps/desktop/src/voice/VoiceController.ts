@@ -157,6 +157,7 @@ export class VoiceController {
   private dragOrigin: [number, number] | undefined;
   private dragUntil = 0;
   private dragMoves = 0;
+  private mainHadFocus = false;
 
   private readonly options: VoiceControllerOptions;
 
@@ -432,15 +433,27 @@ export class VoiceController {
     this.setFocus(false);
   }
 
-  // The orb never takes focus, except while the settings card or a review needs the keyboard.
+  // The orb keeps the keyboard only while the settings card or a review needs it.
   private setFocus(active: boolean) {
     const window = this.window;
     if (!window || window.isDestroyed()) return;
-    window.setFocusable(active);
+    if (this.options.platform !== "win32") window.setFocusable(active);
     if (active) {
+      this.mainHadFocus = Boolean(this.options.mainWindow()?.isFocused());
       window.focus();
       window.webContents.focus();
+    } else if (this.options.platform === "win32") {
+      this.returnFocus();
     }
+  }
+
+  // A press may activate the orb on Windows; give the keyboard back to whoever had it.
+  private returnFocus() {
+    const window = this.window;
+    if (!window?.isFocused() || this.expanded || this.review) return;
+    const main = this.options.mainWindow();
+    if (this.mainHadFocus && main && !main.isDestroyed()) main.focus();
+    else window.blur();
   }
 
   private setExpanded(expanded: boolean) {
@@ -649,7 +662,9 @@ export class VoiceController {
       resizable: false,
       movable: true,
       skipTaskbar: true,
-      focusable: false,
+      // Windows discards the mouse press on a window that cannot activate, so the orb could
+      // never be clicked or dragged. It is still shown inactive, so it only activates on a press.
+      focusable: this.options.platform === "win32",
       hasShadow: false,
       alwaysOnTop: true,
       fullscreenable: false,
@@ -780,6 +795,8 @@ export class VoiceController {
     if (through === this.clickThrough) return;
     window.setIgnoreMouseEvents(through, { forward: true });
     this.clickThrough = through;
+    if (through) this.returnFocus();
+    else this.mainHadFocus = Boolean(this.options.mainWindow()?.isFocused());
   }
 
   private cursorInside(): boolean {
@@ -835,6 +852,7 @@ export class VoiceController {
     this.options.log("voice orb moved", { moves: this.dragMoves });
     this.dragMoves = 0;
     this.setPrefs({ anchor: this.anchor() });
+    this.returnFocus();
   }
 
   private dictationBubble(now: number) {
