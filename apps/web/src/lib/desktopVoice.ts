@@ -1,3 +1,5 @@
+import type { DesktopVoiceDock } from "@t3tools/contracts";
+
 const VOICE_DICTATION_EVENT = "t3code:voice-dictation";
 
 export interface VoiceDictationRequest {
@@ -37,6 +39,22 @@ export function subscribeVoiceDictation(
   const wrapped = (event: Event) => listener((event as CustomEvent<VoiceDictationRequest>).detail);
   window.addEventListener(VOICE_DICTATION_EVENT, wrapped);
   return () => window.removeEventListener(VOICE_DICTATION_EVENT, wrapped);
+}
+
+/** Where the orb should dock: just left of the message box's first footer control, the model name. */
+export function measureVoiceDock(): DesktopVoiceDock | null {
+  const form = document.querySelector("[data-chat-composer-form]");
+  const controls = document.querySelector("[data-chat-composer-footer-controls]");
+  if (!form || !controls) return null;
+  const model = [...controls.children]
+    .map((child) => child.getBoundingClientRect())
+    .find((rect) => rect.width > 0);
+  if (!model) return null;
+  return {
+    x: Math.round(model.left),
+    y: Math.round(model.top + model.height / 2),
+    top: Math.round(form.getBoundingClientRect().top),
+  };
 }
 
 export function focusedTextField(): HTMLElement | null {

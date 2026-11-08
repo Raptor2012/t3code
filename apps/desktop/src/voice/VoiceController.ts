@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import type {
   DesktopVoiceActivity,
   DesktopVoiceDelivery,
+  DesktopVoiceDock,
   DesktopVoiceReply,
   DesktopVoiceThread,
 } from "@t3tools/contracts";
@@ -28,8 +29,9 @@ const MIN_DICTATION_SAMPLES = 16000 * 0.25;
 const TICK_MS = 33;
 const DRAG_HOLD_MS = 600;
 const LEAVE_T3_MS = 300;
-// Above the message box at the window's right, clear of Send.
-const DEFAULT_T3_SPOT: [number, number] = [178, 120];
+// The docked orb: how far its center sits left of the model name and above the window's base.
+const DOCK_ORB_LEFT_OF_MODEL = 26;
+const DOCK_ORB_ABOVE_BASE = 20;
 
 type Delivery = "immediate" | "review" | "composer";
 type DictState = "" | "dictating" | "processing" | "done" | "failed";
@@ -52,8 +54,6 @@ interface Prefs {
   reducedMotion?: boolean;
   /** Set once the first-run introduction has been shown. */
   introduced?: boolean;
-  /** The orb's place inside T3: its center's distance from the right edge, its base's from the bottom. */
-  t3Spot?: [number, number];
 }
 
 interface Review {
@@ -166,6 +166,9 @@ export class VoiceController {
   private insideT3 = false;
   private notInT3Since: number | undefined;
   private home = "";
+  private dock: DesktopVoiceDock | null = null;
+  private docked = false;
+  private dockGap = 0;
 
   private readonly options: VoiceControllerOptions;
 
@@ -518,7 +521,7 @@ export class VoiceController {
         : "Hold Mouse Forward and talk to dictate into T3, then let go. ";
     this.showBubble(
       "maeve",
-      `Hi, I'm Maeve. ${dictate}Click me to choose which threads I read aloud.`,
+      `Hi, I'm your voice agent. ${dictate}Click me to choose which threads I read aloud.`,
       "intro",
       14_000,
     );
@@ -677,7 +680,7 @@ export class VoiceController {
       alwaysOnTop: true,
       fullscreenable: false,
       backgroundColor: "#00000000",
-      title: "Maeve",
+      title: "Voice agent",
       webPreferences: {
         preload: NodePath.join(this.options.workerDirectory, "orb-preload.cjs"),
         contextIsolation: true,
@@ -734,21 +737,7 @@ export class VoiceController {
     this.window?.setBounds({ x: Math.round(x), y: Math.round(y), ...SURFACE });
   }
 
-  // Where the orb sits inside T3, kept relative to the window's bottom-right corner.
-  private spotInT3(content: Electron.Rectangle): [number, number] {
-    const [fromRight, fromBottom] = this.prefs.t3Spot ?? DEFAULT_T3_SPOT;
-    const right = content.x + content.width;
-    const bottom = content.y + content.height;
-    return [
-      Math.max(
-        content.x + SURFACE.width / 2,
-        Math.min(right - SURFACE.width / 2 - 8, right - fromRight),
-      ),
-      Math.max(content.y + 150, Math.min(bottom, bottom - fromBottom)),
-    ];
-  }
-
-  // While T3 is in front the orb lives inside its window and follows it; otherwise it floats.
+  // While T3 is in front the orb docks beside the model name; otherwise it floats.
   private followT3(now: number) {
     const window = this.window;
     const main = this.options.mainWindow();
@@ -764,15 +753,38 @@ export class VoiceController {
       this.notInT3Since ??= now;
       if (now - this.notInT3Since > LEAVE_T3_MS) this.insideT3 = false;
     }
-    const content = this.insideT3 && main && !main.isDestroyed() ? main.getContentBounds() : null;
-    const home = content ? `${content.x},${content.y},${content.width},${content.height}` : "float";
+    const dock = this.insideT3 && main && !main.isDestroyed() ? this.dock : null;
+    const content = dock && main ? main.getContentBounds() : null;
+    const zoom = main && content ? main.webContents.getZoomFactor() : 1;
+    this.docked = content !== null;
+    const home =
+      content && dock
+        ? `${content.x},${content.y},${dock.x},${dock.y},${dock.top},${zoom}`
+        : "float";
     if (home === this.home) return;
     this.home = home;
-    this.place(content ? this.spotInT3(content) : (this.prefs.anchor ?? this.defaultAnchor()));
+    if (!content || !dock) {
+      this.place(this.prefs.anchor ?? this.defaultAnchor());
+      return;
+    }
+    this.dockGap = (dock.y - dock.top) * zoom + DOCK_ORB_ABOVE_BASE + 8;
+    this.place([
+      content.x + dock.x * zoom - DOCK_ORB_LEFT_OF_MODEL,
+      content.y + dock.y * zoom + DOCK_ORB_ABOVE_BASE,
+    ]);
+  }
+
+  // A message the user sent themselves from T3 settles the draft under review.
+  private onUserMessage(thread: Pick<DesktopVoiceThread, "environmentId" | "threadId">) {
+    const review = this.review;
+    if (!review || review.sending || threadKey(review.target) !== threadKey(thread)) return;
+    this.review = null;
+    this.composerDraft = undefined;
+    this.setFocus(false);
   }
 
   private wantsVisible(now: number): boolean {
-    if (this.insideT3) return true;
+    if (this.docked) return true;
     if (this.agentActivity === "approval" || this.agentActivity === "input") return true;
     if (
       this.review ||
@@ -882,7 +894,7 @@ export class VoiceController {
   }
 
   private dragWindow(gesture: number, dx: number, dy: number) {
-    if (gesture < this.dragGesture) return;
+    if (this.docked || gesture < this.dragGesture) return;
     if (gesture !== this.dragGesture) {
       this.dragGesture = gesture;
       this.dragOrigin = this.anchor();
@@ -894,21 +906,12 @@ export class VoiceController {
     this.place([this.dragOrigin[0] + dx, this.dragOrigin[1] + dy]);
   }
 
-  // Saved once the drag ends, so disk writes never compete with the drag or Maeve's audio.
+  // Saved once the drag ends, so disk writes never compete with the drag or the audio.
   private finishDrag(now: number) {
     if (this.dragMoves === 0 || now < this.dragUntil) return;
     this.options.log("voice orb moved", { moves: this.dragMoves });
     this.dragMoves = 0;
-    const [cx, bottom] = this.anchor();
-    const main = this.options.mainWindow();
-    if (this.insideT3 && main && !main.isDestroyed()) {
-      const content = main.getContentBounds();
-      this.setPrefs({
-        t3Spot: [content.x + content.width - cx, content.y + content.height - bottom],
-      });
-    } else {
-      this.setPrefs({ anchor: [cx, bottom] });
-    }
+    this.setPrefs({ anchor: this.anchor() });
     this.returnFocus();
   }
 
@@ -940,7 +943,7 @@ export class VoiceController {
   private snapshot(): Record<string, unknown> {
     const now = Date.now();
     const following = this.prefs.followActive !== false;
-    let hint = this.detail || "Hold Mouse Forward to dictate. Ctrl+Alt+M stops Maeve.";
+    let hint = this.detail || "Hold Mouse Forward to dictate. Ctrl+Alt+M stops the voice agent.";
     hint = following
       ? `${this.detail ? `${this.detail} · ` : ""}${this.activeThread ? "Following open T3 thread" : "Open a thread in T3 to speak to it"}`
       : `Pinned thread · ${hint}`;
@@ -975,6 +978,8 @@ export class VoiceController {
       dictActivation: "push",
       followActive: following,
       expanded: this.expanded,
+      docked: this.docked,
+      dockGap: this.dockGap,
       hovered: this.hovered,
       settingsCloseRequest: this.cardCloseAt ?? 0,
       viewportTarget: [SURFACE.width, SURFACE.height],
@@ -1031,6 +1036,15 @@ export class VoiceController {
     Electron.ipcMain.on("voice-orb:playback-failed", (event, message: string) => {
       if (fromOrb(event)) this.options.log("voice playback failed", { error: String(message) });
     });
+    Electron.ipcMain.on(IpcChannels.VOICE_DOCK_CHANNEL, (event, dock: DesktopVoiceDock | null) => {
+      if (fromMain(event)) this.dock = dock;
+    });
+    Electron.ipcMain.on(
+      IpcChannels.VOICE_USER_MESSAGE_CHANNEL,
+      (event, thread: Pick<DesktopVoiceThread, "environmentId" | "threadId">) => {
+        if (fromMain(event)) this.onUserMessage(thread);
+      },
+    );
     Electron.ipcMain.on(
       IpcChannels.VOICE_THREADS_CHANNEL,
       (event, threads: DesktopVoiceThread[], active: DesktopVoiceThread | null) => {
@@ -1151,7 +1165,7 @@ export class VoiceController {
       case "test_voice":
         this.speak(
           `voice-test-${Date.now()}`,
-          "Hello. I am Maeve. Speak, and I will send it to this thread and read the reply.",
+          "Hello. I am your voice agent. Speak, and I will send it to this thread and read the reply.",
         );
         return undefined;
       case "quit":

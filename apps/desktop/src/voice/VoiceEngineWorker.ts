@@ -42,7 +42,7 @@ async function init(request: Extract<VoiceEngineRequest, { type: "init" }>) {
       const [what, failed] =
         loadedStt.status === "rejected"
           ? ["speech to text", loadedStt]
-          : ["Maeve's voice", loadedSpeech as PromiseRejectedResult];
+          : ["the voice agent's voice", loadedSpeech as PromiseRejectedResult];
       throw new Error(`${what}: ${(failed.reason as Error).message}`);
     }
     stt = loadedStt.value;

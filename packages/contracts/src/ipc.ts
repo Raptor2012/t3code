@@ -1029,6 +1029,13 @@ export interface DesktopVoiceThread {
 }
 
 /** A finished dictation for a thread: placed in its composer, or sent as the next message. */
+/** In page coordinates: the model name's left edge and vertical center, and the message box's top. */
+export interface DesktopVoiceDock {
+  readonly x: number;
+  readonly y: number;
+  readonly top: number;
+}
+
 export interface DesktopVoiceDelivery {
   readonly id: number;
   readonly environmentId: string;
@@ -1062,6 +1069,12 @@ export interface DesktopVoiceBridge {
   ) => void;
   readonly onDelivery: (listener: (delivery: DesktopVoiceDelivery) => void) => () => void;
   readonly completeDelivery: (id: number, error?: string) => void;
+  /** Where the orb docks in the page, or null when no message box is showing. */
+  readonly reportDock: (dock: DesktopVoiceDock | null) => void;
+  /** A user message reached this thread, however it was sent. */
+  readonly reportUserMessage: (
+    thread: Pick<DesktopVoiceThread, "environmentId" | "threadId">,
+  ) => void;
 }
 
 export interface DesktopBridge {

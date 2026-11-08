@@ -7,7 +7,7 @@ import type {
 } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import * as DateTime from "effect/DateTime";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useHandleNewThread } from "../../hooks/useHandleNewThread";
@@ -16,6 +16,7 @@ import {
   composeDictatedPrompt,
   dispatchVoiceDictation,
   focusedTextField,
+  measureVoiceDock,
   ReplyOpenGate,
 } from "../../lib/desktopVoice";
 import { newMessageId } from "../../lib/utils";
@@ -29,6 +30,7 @@ import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 
 const MAX_THREADS = 40;
+const DOCK_POLL_MS = 250;
 
 function voiceBridge(): DesktopVoiceBridge | undefined {
   return typeof window === "undefined" ? undefined : window.desktopBridge?.voice;
@@ -73,6 +75,21 @@ function VoiceCoordinatorWithBridge({ bridge }: { bridge: DesktopVoiceBridge }) 
     ];
     bridge.reportThreads(nextThreads, nextActive);
   }, [bridge, threadsKey]);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- tracks where the message box is on screen for the desktop orb window, which React does not render
+  useEffect(() => {
+    let last = "";
+    const measure = () => {
+      const dock = measureVoiceDock();
+      const key = JSON.stringify(dock);
+      if (key === last) return;
+      last = key;
+      bridge.reportDock(dock);
+    };
+    measure();
+    const timer = window.setInterval(measure, DOCK_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [bridge]);
 
   const activity: DesktopVoiceActivity = routeShell
     ? routeShell.hasPendingApprovals
@@ -184,6 +201,26 @@ function ReplyReporter({
       final: !latest.streaming,
     });
   }, [bridge, threadRef, latest, text, gate, hasItems]);
+
+  const lastUserMessage = latestUserMessageId(items);
+  const seenUserMessage = useRef<string | null | undefined>(undefined);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- tells the desktop orb a message was sent, so it can close its draft; only messages after the thread loads count
+  useEffect(() => {
+    if (!hasItems) return;
+    const seen = seenUserMessage.current;
+    seenUserMessage.current = lastUserMessage;
+    if (seen !== undefined && lastUserMessage !== null && lastUserMessage !== seen) {
+      bridge.reportUserMessage(threadRef);
+    }
+  }, [bridge, threadRef, lastUserMessage, hasItems]);
+  return null;
+}
+
+function latestUserMessageId(items: ReturnType<typeof useThreadVisibleTurnItems>) {
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index]!.item;
+    if (item.type === "user_message") return item.id as string;
+  }
   return null;
 }
 

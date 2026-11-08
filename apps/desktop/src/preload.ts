@@ -239,6 +239,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
     completeDelivery: (id, error) =>
       ipcRenderer.send(IpcChannels.VOICE_DELIVERY_DONE_CHANNEL, id, error),
+    reportDock: (dock) => ipcRenderer.send(IpcChannels.VOICE_DOCK_CHANNEL, dock),
+    reportUserMessage: (thread) => ipcRenderer.send(IpcChannels.VOICE_USER_MESSAGE_CHANNEL, thread),
   },
   onSnapShotEvent: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, event: unknown) => {

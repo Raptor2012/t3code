@@ -56,6 +56,26 @@
         inset: 0;
         cursor: pointer;
       }
+      /* Docked beside the model name while T3 is in front: small, with its text above the message box. */
+      body.docked #orbwrap {
+        bottom: -46px;
+        transform: scale(0.45);
+        transform-origin: 90px 84px;
+      }
+      body.docked .ctl,
+      body.docked #toBar,
+      body.docked #badge,
+      body.docked #cap {
+        display: none;
+      }
+      body.docked #bubble,
+      body.docked #review {
+        bottom: var(--dock-gap, 112px);
+      }
+      body.docked #card {
+        bottom: var(--dock-gap, 150px);
+        max-height: calc(100% - var(--dock-gap, 150px) - 8px);
+      }
       #parts {
         position: absolute;
         inset: 0;
@@ -942,7 +962,7 @@
   <body>
     <div id="stage">
       <div id="bubble">
-        <div id="who">Maeve</div>
+        <div id="who">Voice agent</div>
         <div id="bubbleText">
           <div id="bmeasure" aria-hidden="true"></div>
           <div id="btext"></div>
@@ -969,7 +989,7 @@
           <option value="composer">Draft in T3 · Enter there to send</option>
         </select>
         <div class="foot">
-          <span id="fTest">Test Maeve</span><span id="fMore">Options ⋯</span
+          <span id="fTest">Test voice agent</span><span id="fMore">Options ⋯</span
           ><span id="fQuit">Quit</span>
         </div>
         <div id="menu">
@@ -993,7 +1013,7 @@
         </div>
         <div id="devices" aria-label="Audio devices">
           <div class="dhead">Audio devices</div>
-          <label>Speaker (Maeve's voice)<select id="spkSel"></select></label>
+          <label>Speaker (voice agent)<select id="spkSel"></select></label>
           <label>Microphone (orb levels and live preview)<select id="micSel"></select></label>
           <div class="dnote">
             Dictation itself is recorded by OpenWhispr with the mic chosen in its own settings.
@@ -1023,7 +1043,7 @@
             <path class="slash" d="M4 4l16 16" />
           </svg>
         </div>
-        <div class="ctl" id="muteMaeve" title="Mute Maeve">
+        <div class="ctl" id="muteMaeve" title="Mute voice agent">
           <svg viewBox="0 0 24 24">
             <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
             <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
@@ -1041,7 +1061,7 @@
         <div
           id="playbackTrack"
           role="progressbar"
-          aria-label="Maeve playback"
+          aria-label="Voice agent playback"
           aria-valuemin="0"
           aria-valuemax="100"
         >
@@ -1056,7 +1076,7 @@
             <path class="slash" d="M4 4l16 16" />
           </svg>
         </div>
-        <div class="bbtn" id="barMaeve" title="Mute Maeve">
+        <div class="bbtn" id="barMaeve" title="Mute voice agent">
           <svg viewBox="0 0 24 24">
             <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
             <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
@@ -1239,7 +1259,7 @@
         thinking: "Thinking",
         approval: "Waiting for approval",
         input: "Waiting for your answer",
-        loading: "Loading Maeve…",
+        loading: "Loading voice agent…",
         off: "Voice off",
         ready: "",
         hearing: "Listening",
@@ -1937,8 +1957,8 @@
                 ? "You · transcribing"
                 : "You"
             : S.maeveMuted
-              ? "Maeve · muted"
-              : "Maeve",
+              ? "Voice agent · muted"
+              : "Voice agent",
         );
         const tokens = [...B.text.matchAll(/(\S+)(\s*)/g)].map((m) => ({ word: m[1], gap: m[2] }));
         if (measuredBubbleText !== B.text) {
@@ -2029,6 +2049,8 @@
         else if (!settingsPending && S.expanded !== undefined && expanded !== !!S.expanded)
           applyExpanded(!!S.expanded);
         document.body.classList.toggle("reviewing", !!S.review);
+        document.body.classList.toggle("docked", !!S.docked);
+        if (S.docked) document.body.style.setProperty("--dock-gap", S.dockGap + "px");
         reviewEl.classList.toggle("show", !!S.review);
         if (S.review && S.review.id !== reviewId) {
           reviewId = S.review.id;
@@ -2077,7 +2099,7 @@
         muteMic.classList.toggle("muted", S.micMuted);
         muteMic.title = S.micMuted ? "Resume T3 voice input" : "Pause T3 voice input";
         muteMaeve.classList.toggle("muted", S.maeveMuted);
-        muteMaeve.title = S.maeveMuted ? "Unmute Maeve" : "Mute Maeve";
+        muteMaeve.title = S.maeveMuted ? "Unmute voice agent" : "Mute voice agent";
         barMic.classList.toggle("muted", S.micMuted);
         barMic.title = muteMic.title;
         barMaeve.classList.toggle("muted", S.maeveMuted);
@@ -2305,6 +2327,13 @@
           if (id === "bubble" && !el.classList.contains("show") && Number(style.opacity) < 0.01)
             continue;
           const r = el.getBoundingClientRect();
+          if (id === "orbwrap" && document.body.classList.contains("docked")) {
+            // Only the small orb itself, so the model picker beside it stays clickable.
+            const cx = r.left + CX * 0.45,
+              cy = r.top + CY * 0.45;
+            regions.push({ id, x: cx - 18, y: cy - 18, width: 36, height: 36 });
+            continue;
+          }
           if (r.width && r.height)
             regions.push({ id, x: r.left, y: r.top, width: r.width, height: r.height });
         }
@@ -2464,6 +2493,7 @@
         render();
       }
       function pointerOverControls(x, y) {
+        if (document.body.classList.contains("docked")) return false;
         const rect = cv.getBoundingClientRect();
         if (Math.hypot(x - rect.left - CX, y - rect.top - CY) <= R * 1.6) return true;
         for (const id of barMode ? ["bar"] : ["muteMic", "muteMaeve", "toBar"]) {
