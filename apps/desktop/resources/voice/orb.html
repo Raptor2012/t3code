@@ -56,14 +56,6 @@
         inset: 0;
         cursor: pointer;
       }
-      /* Opened from the message box's icon: the card alone, sitting just above the icon. */
-      body.inline-card #orbwrap {
-        visibility: hidden;
-      }
-      body.inline-card #card {
-        bottom: 8px;
-        max-height: calc(100% - 16px);
-      }
       #parts {
         position: absolute;
         inset: 0;
@@ -2037,7 +2029,6 @@
         else if (!settingsPending && S.expanded !== undefined && expanded !== !!S.expanded)
           applyExpanded(!!S.expanded);
         document.body.classList.toggle("reviewing", !!S.review);
-        document.body.classList.toggle("inline-card", !!S.inlineCard);
         reviewEl.classList.toggle("show", !!S.review);
         if (S.review && S.review.id !== reviewId) {
           reviewId = S.review.id;
@@ -2453,11 +2444,6 @@
         orbTapFeedback(opening);
         setExpanded(opening);
       }
-      window.addEventListener("maeve-open-card", () => {
-        S.inlineCard = true;
-        document.body.classList.add("inline-card");
-        setExpanded(true);
-      });
       function panelExtra() {
         api("set_panel_extra", document.getElementById("list").classList.contains("open"));
       }

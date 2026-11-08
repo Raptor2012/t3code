@@ -6,7 +6,6 @@ import type {
   DesktopPreviewTabState,
   DesktopSnapShotEvent,
   DesktopVoiceDelivery,
-  DesktopVoiceIconState,
 } from "@t3tools/contracts";
 import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
@@ -73,14 +72,6 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
   }
   return result as Awaited<ReturnType<DesktopBridge["ensureSshEnvironment"]>>;
 }
-
-// Remembered here so a message box that mounts later still shows Maeve's current state.
-let voiceState: DesktopVoiceIconState | undefined;
-const voiceStateListeners = new Set<(state: DesktopVoiceIconState) => void>();
-ipcRenderer.on(IpcChannels.VOICE_STATE_CHANNEL, (_event, state: DesktopVoiceIconState) => {
-  voiceState = state;
-  for (const listener of voiceStateListeners) listener(state);
-});
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getAppBranding: () => {
@@ -248,14 +239,6 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
     completeDelivery: (id, error) =>
       ipcRenderer.send(IpcChannels.VOICE_DELIVERY_DONE_CHANNEL, id, error),
-    onState: (listener) => {
-      voiceStateListeners.add(listener);
-      if (voiceState) listener(voiceState);
-      return () => {
-        voiceStateListeners.delete(listener);
-      };
-    },
-    openSettings: (rect) => ipcRenderer.send(IpcChannels.VOICE_OPEN_SETTINGS_CHANNEL, rect),
   },
   onSnapShotEvent: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, event: unknown) => {

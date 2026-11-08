@@ -42,22 +42,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-new(t3-mobil
   mix-blend-mode: normal;
 }
 
-@keyframes t3-voice-wave {
-  0%,
-  100% {
-    transform: scaleY(0.3);
-  }
-  50% {
-    transform: scaleY(1);
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .t3-voice-wave-bar {
-    animation: t3-voice-wave 900ms ease-in-out infinite;
-  }
-}
-
 /* The expanded and compact composers have different internal layouts. Use a
    brief crossfade while their shared wrapper moves so the layout change does
    not read as a single-frame cut. */
