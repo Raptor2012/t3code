@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import type {
   DesktopVoiceActivity,
   DesktopVoiceDelivery,
+  DesktopVoiceIconState,
   DesktopVoiceReply,
   DesktopVoiceThread,
 } from "@t3tools/contracts";
@@ -158,6 +159,11 @@ export class VoiceController {
   private dragUntil = 0;
   private dragMoves = 0;
   private mainHadFocus = false;
+  /** The settings card is open beside the message box's icon, not above the orb. */
+  private cardFromIcon = false;
+  private iconState: DesktopVoiceIconState | undefined;
+  private speechEndsAt = 0;
+  private liveWords: Promise<unknown> | undefined;
 
   private readonly options: VoiceControllerOptions;
 
@@ -281,7 +287,11 @@ export class VoiceController {
     if (!engine || !request) return;
     const finish = (decode: PreviewDecode) => {
       const shown = this.preview.complete(request.session, decode);
-      if (shown && !this.review) this.dictPreviewText = shown.slice(-1200);
+      if (!shown || this.review) return;
+      this.dictPreviewText = shown.slice(-1200);
+      if (this.target && this.inFront()) {
+        this.liveWords = this.deliver(this.target, shown, "live").catch(() => undefined);
+      }
     };
     engine
       .preview(request.samples, 16000)
@@ -340,8 +350,12 @@ export class VoiceController {
       this.failDictation("Open a thread in T3 Code first.");
       return;
     }
+    // The final text must replace the last live words, so it waits for them to land.
+    await this.liveWords;
+    this.liveWords = undefined;
+    if (session !== this.dictSession) return;
     const delivery = this.prefs.delivery ?? "review";
-    if (delivery === "review") {
+    if (delivery === "review" && !this.inFront()) {
       // Lands in the field you were typing in first, while T3 still has the keyboard.
       await this.deliver(target, text, "composer").catch((error: Error) =>
         this.options.log("voice dictation not placed", { error: error.message }),
@@ -369,7 +383,7 @@ export class VoiceController {
     }
   }
 
-  private deliver(target: DesktopVoiceThread, text: string, mode: "composer" | "send") {
+  private deliver(target: DesktopVoiceThread, text: string, mode: DesktopVoiceDelivery["mode"]) {
     const main = this.options.mainWindow();
     if (!main || main.isDestroyed()) {
       return Promise.reject(new Error("T3 Code's window is closed."));
@@ -394,7 +408,7 @@ export class VoiceController {
         clearTimeout(timeout);
         if (error) reject(new Error(error));
         else {
-          this.composerDraft = mode === "composer" ? { key, text } : undefined;
+          this.composerDraft = mode === "send" ? undefined : { key, text };
           if (mode === "send") {
             this.visualEvents.sent++;
             this.sentAt = Date.now();
@@ -471,8 +485,60 @@ export class VoiceController {
     this.outsideSince = undefined;
     if (!expanded) this.panelExtra = false;
     this.showUntil = Date.now() + LINGER_MS;
+    if (!expanded && this.cardFromIcon) this.tuckIconCard();
     this.setFocus(expanded);
     return { expanded, size };
+  }
+
+  private inFront(): boolean {
+    const main = this.options.mainWindow();
+    return Boolean(main && !main.isDestroyed() && !main.isMinimized() && main.isFocused());
+  }
+
+  // Opens the settings card just above the message box's icon. `rect` is in page coordinates.
+  private openCardFromIcon(rect: { x: number; y: number; width: number }) {
+    const now = Date.now();
+    const main = this.options.mainWindow();
+    if (!main || main.isDestroyed() || this.review?.sending) return;
+    // A click on the icon while the card is open already closed it on the way here.
+    if (this.expanded || now - this.expandedAt < 300) return;
+    const content = main.getContentBounds();
+    const top = content.y + rect.y;
+    const center = content.x + rect.x + rect.width / 2;
+    const area = Electron.screen.getDisplayNearestPoint({ x: Math.round(center), y: top }).workArea;
+    const fitted = Math.max(
+      area.x + SURFACE.width / 2 + 4,
+      Math.min(center, area.x + area.width - SURFACE.width / 2 - 4),
+    );
+    this.cancelReview();
+    this.cardFromIcon = true;
+    this.place([fitted, top - 4]);
+    this.window?.webContents.send("voice-orb:open-card");
+  }
+
+  private tuckIconCard() {
+    this.cardFromIcon = false;
+    this.visible = false;
+    this.hideAt = undefined;
+    this.window?.hide();
+    this.place(this.prefs.anchor ?? this.defaultAnchor());
+  }
+
+  private pushIconState(now: number) {
+    const voiceless = this.voiceOn() ? "ready" : "off";
+    const state: DesktopVoiceIconState =
+      this.dictState === "dictating"
+        ? "listening"
+        : this.dictState === "processing"
+          ? "processing"
+          : this.speaking || now < this.speechEndsAt
+            ? "speaking"
+            : voiceless;
+    if (state === this.iconState) return;
+    const main = this.options.mainWindow();
+    if (!main || main.isDestroyed()) return;
+    this.iconState = state;
+    main.webContents.send(IpcChannels.VOICE_STATE_CHANNEL, state);
   }
 
   // Closes the settings card when the user clicks another window or leaves it for 2.5 s.
@@ -495,7 +561,7 @@ export class VoiceController {
     this.outsideSince = inside ? undefined : (this.outsideSince ?? now);
     if (
       (this.cardFocused && !ours && !inside) ||
-      (this.outsideSince !== undefined && now - this.outsideSince > 2500)
+      (!this.cardFromIcon && this.outsideSince !== undefined && now - this.outsideSince > 2500)
     ) {
       this.cardCloseAt = now;
     }
@@ -550,6 +616,7 @@ export class VoiceController {
     const job = engine.speak(text, (pcm) => {
       if (this.speaking !== speaking) return;
       if (this.playback?.run === run) this.playback.total += pcm.length;
+      this.speechEndsAt = Math.max(Date.now(), this.speechEndsAt) + (pcm.length / 24000) * 1000;
       this.window?.webContents.send("voice-orb:audio", { id: run, pcm });
     });
     speaking.utterances.add(job.id);
@@ -576,6 +643,7 @@ export class VoiceController {
     if (this.speaking) this.reader.silence(this.speaking.message);
     this.speaking = undefined;
     this.playback = null;
+    this.speechEndsAt = 0;
     if (interrupt) this.visualEvents.interrupt++;
     this.setState(this.idleState());
   }
@@ -726,6 +794,9 @@ export class VoiceController {
   }
 
   private wantsVisible(now: number): boolean {
+    if (this.cardFromIcon || this.expanded || this.review) return true;
+    // While T3 is the active window, the icon in its message box stands in for the orb.
+    if (this.inFront()) return false;
     if (this.agentActivity === "approval" || this.agentActivity === "input") return true;
     if (
       this.review ||
@@ -757,6 +828,7 @@ export class VoiceController {
     this.watchCard(now);
     this.finishDrag(now);
     this.runPreview(now);
+    this.pushIconState(now);
     // A thread opened during a dictation, review or reply was deferred; catch up once it ends.
     if (
       this.prefs.followActive !== false &&
@@ -918,6 +990,7 @@ export class VoiceController {
       dictActivation: "push",
       followActive: following,
       expanded: this.expanded,
+      inlineCard: this.cardFromIcon,
       hovered: this.hovered,
       settingsCloseRequest: this.cardCloseAt ?? 0,
       viewportTarget: [SURFACE.width, SURFACE.height],
@@ -977,7 +1050,16 @@ export class VoiceController {
     Electron.ipcMain.on(
       IpcChannels.VOICE_THREADS_CHANNEL,
       (event, threads: DesktopVoiceThread[], active: DesktopVoiceThread | null) => {
-        if (fromMain(event) && Array.isArray(threads)) this.onThreads(threads, active);
+        if (!fromMain(event) || !Array.isArray(threads)) return;
+        this.onThreads(threads, active);
+        // A reloaded page has lost the icon's state; the next tick resends it.
+        this.iconState = undefined;
+      },
+    );
+    Electron.ipcMain.on(
+      IpcChannels.VOICE_OPEN_SETTINGS_CHANNEL,
+      (event, rect: { x: number; y: number; width: number }) => {
+        if (fromMain(event)) this.openCardFromIcon(rect);
       },
     );
     Electron.ipcMain.on(IpcChannels.VOICE_REPLY_CHANNEL, (event, reply: DesktopVoiceReply) => {

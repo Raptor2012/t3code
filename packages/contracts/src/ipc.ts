@@ -1029,12 +1029,15 @@ export interface DesktopVoiceThread {
 }
 
 /** A finished dictation for a thread: placed in its composer, or sent as the next message. */
+export type DesktopVoiceIconState = "off" | "ready" | "listening" | "processing" | "speaking";
+
 export interface DesktopVoiceDelivery {
   readonly id: number;
   readonly environmentId: string;
   readonly threadId: string;
   readonly text: string;
-  readonly mode: "composer" | "send";
+  /** `live` is words shown while the dictation key is held; the final text replaces them. */
+  readonly mode: "composer" | "send" | "live";
   /** An earlier unsent dictation in the composer that this one replaces. */
   readonly replaces?: string | undefined;
 }
@@ -1062,6 +1065,14 @@ export interface DesktopVoiceBridge {
   ) => void;
   readonly onDelivery: (listener: (delivery: DesktopVoiceDelivery) => void) => () => void;
   readonly completeDelivery: (id: number, error?: string) => void;
+  /** Calls back with the current state at once if known, then on each change. */
+  readonly onState: (listener: (state: DesktopVoiceIconState) => void) => () => void;
+  /** Opens Maeve's settings above `rect`, given in page coordinates. */
+  readonly openSettings: (rect: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+  }) => void;
 }
 
 export interface DesktopBridge {

@@ -129,3 +129,5 @@ export const VOICE_REPLY_CHANNEL = "desktop:voice-reply";
 export const VOICE_ACTIVITY_CHANNEL = "desktop:voice-activity";
 export const VOICE_DELIVERY_CHANNEL = "desktop:voice-delivery";
 export const VOICE_DELIVERY_DONE_CHANNEL = "desktop:voice-delivery-done";
+export const VOICE_STATE_CHANNEL = "desktop:voice-state";
+export const VOICE_OPEN_SETTINGS_CHANNEL = "desktop:voice-open-settings";

@@ -110,6 +110,13 @@ function VoiceCoordinatorWithBridge({ bridge }: { bridge: DesktopVoiceBridge }) 
     writeComposer(delivery, delivery.text);
   };
 
+  // Live words only ever go in the message box; a final dictation handles any other field.
+  const placeLiveWords = (delivery: DesktopVoiceDelivery) => {
+    const field = focusedTextField();
+    if (field && field.closest("[data-chat-composer-form]") == null) return;
+    writeComposer(delivery, delivery.text);
+  };
+
   // Sends straight to the thread, like any agent message: it never depends on the thread being
   // open, on what the composer holds, or on the window being visible.
   const sendDictation = async (delivery: DesktopVoiceDelivery) => {
@@ -134,6 +141,7 @@ function VoiceCoordinatorWithBridge({ bridge }: { bridge: DesktopVoiceBridge }) 
   const deliver = useStableCallback(async (delivery: DesktopVoiceDelivery) => {
     try {
       if (delivery.mode === "send") await sendDictation(delivery);
+      else if (delivery.mode === "live") placeLiveWords(delivery);
       else placeDictation(delivery);
       bridge.completeDelivery(delivery.id, undefined);
       if (delivery.mode === "send" && delivery.replaces) writeComposer(delivery, "");

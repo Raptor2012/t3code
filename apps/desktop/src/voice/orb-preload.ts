@@ -352,6 +352,7 @@ ipcRenderer.on("voice-orb:audio", (_event, chunk: { id: number; pcm: Float32Arra
   });
 });
 ipcRenderer.on("voice-orb:flush", () => audio.flush());
+ipcRenderer.on("voice-orb:open-card", () => window.dispatchEvent(new Event("maeve-open-card")));
 
 window.addEventListener("DOMContentLoaded", () => {
   window.dispatchEvent(new Event("pywebviewready"));
