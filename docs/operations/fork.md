@@ -42,6 +42,10 @@ configuration from `.env.example`. Their update feed is this repository
 (`T3CODE_DESKTOP_UPDATE_REPOSITORY`), so installs update from the fork's releases, never
 upstream's.
 
+To try a change on Windows first, tag a test build, `vX.Y.Z-voice.<n>.<m>`, for example
+`v0.1.7-voice.7.1`. It builds and publishes Windows only and sorts before `voice.<n+1>`. It
+becomes the latest release, so macOS and Linux installs see no update until the next full release.
+
 Upstream's own workflows are disabled in the fork's Actions settings. They only run in
 `pingdotgg/t3code` and on Blacksmith runners.
 

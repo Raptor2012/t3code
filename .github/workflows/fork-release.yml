@@ -5,7 +5,8 @@ name: Fork release
 # runners, so the fork keeps its own pipeline. It reuses upstream's packaging
 # script and update-manifest merge, and points the updater at this repository.
 #
-# Versions are `<upstream version>-voice.<n>`, tagged `v<version>`.
+# Versions are `<upstream version>-voice.<n>`, tagged `v<version>`. A test build,
+# `<upstream version>-voice.<n>.<m>`, builds and publishes Windows only.
 
 on:
   push:
@@ -34,38 +35,38 @@ env:
   VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
+  plan:
+    name: Plan platforms
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      windows_only: ${{ steps.plan.outputs.windows_only }}
+    steps:
+      - id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          windows='{"label":"Windows x64","runner":"windows-latest","platform":"win","target":"nsis","arch":"x64","rust_target":"x86_64-pc-windows-msvc"}'
+          mac_arm='{"label":"macOS arm64","runner":"macos-latest","platform":"mac","target":"dmg","arch":"arm64","rust_target":"aarch64-apple-darwin"}'
+          mac_x64='{"label":"macOS x64","runner":"macos-15-intel","platform":"mac","target":"dmg","arch":"x64","rust_target":"x86_64-apple-darwin"}'
+          linux='{"label":"Linux x64","runner":"ubuntu-24.04","platform":"linux","target":"AppImage","arch":"x64","rust_target":"x86_64-unknown-linux-gnu"}'
+          if [[ "${VERSION#v}" =~ -voice\.[0-9]+\.[0-9]+$ ]]; then
+            echo "windows_only=true" >> "$GITHUB_OUTPUT"
+            echo "matrix=[$windows]" >> "$GITHUB_OUTPUT"
+          else
+            echo "windows_only=false" >> "$GITHUB_OUTPUT"
+            echo "matrix=[$windows,$mac_arm,$mac_x64,$linux]" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: Build ${{ matrix.label }}
+    needs: plan
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - label: Windows x64
-            runner: windows-latest
-            platform: win
-            target: nsis
-            arch: x64
-            rust_target: x86_64-pc-windows-msvc
-          - label: macOS arm64
-            runner: macos-latest
-            platform: mac
-            target: dmg
-            arch: arm64
-            rust_target: aarch64-apple-darwin
-          - label: macOS x64
-            runner: macos-15-intel
-            platform: mac
-            target: dmg
-            arch: x64
-            rust_target: x86_64-apple-darwin
-          - label: Linux x64
-            runner: ubuntu-24.04
-            platform: linux
-            target: AppImage
-            arch: x64
-            rust_target: x86_64-unknown-linux-gnu
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       # checkout's credential cleanup runs submodule foreach, which fails on the
       # orphaned gitlinks in the vendored .repos tree, so fetch by hand.
@@ -86,8 +87,8 @@ jobs:
         run: |
           set -euo pipefail
           version="${VERSION#v}"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-voice\.[0-9]+$ ]]; then
-            echo "Version must look like 0.1.7-voice.1, got: $version" >&2
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-voice\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "Version must look like 0.1.7-voice.1 or 0.1.7-voice.1.1, got: $version" >&2
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
@@ -161,7 +162,7 @@ jobs:
 
   release:
     name: Publish release
-    needs: build
+    needs: [plan, build]
     # macOS is experimental and GitHub's hosted Mac runners sometimes never pick
     # up a job, so a release ships once Windows and Linux are built.
     if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/v') || inputs.publish) }}
@@ -194,15 +195,19 @@ jobs:
 
       - name: Require Windows and Linux builds
         shell: bash
+        env:
+          WINDOWS_ONLY: ${{ needs.plan.outputs.windows_only }}
         run: |
           set -euo pipefail
-          for manifest in latest.yml latest-linux.yml; do
+          manifests=(latest.yml)
+          [[ "$WINDOWS_ONLY" == "true" ]] || manifests+=(latest-linux.yml)
+          for manifest in "${manifests[@]}"; do
             if [[ ! -f "release-assets/$manifest" ]]; then
-              echo "Missing $manifest: the Windows or Linux build failed." >&2
+              echo "Missing $manifest: a required build failed." >&2
               exit 1
             fi
           done
-          if [[ ! -f release-assets/latest-mac.yml ]]; then
+          if [[ "$WINDOWS_ONLY" != "true" && ! -f release-assets/latest-mac.yml ]]; then
             echo "::warning::No macOS build in this release."
           fi
 
@@ -232,5 +237,6 @@ jobs:
           gh release create "$tag" release-assets/* \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
+            --latest \
             --title "T3 Code $version" \
             --notes "T3 Code $version with built-in voice (fork of pingdotgg/t3code). macOS builds are not signed by Apple and are experimental."
