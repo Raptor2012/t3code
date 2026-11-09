@@ -10,7 +10,7 @@ import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { resolveVoiceSpeechEnv } from "../voice/voiceModels.ts";
+import { resolveHostVoiceEnv } from "../voice/voiceModels.ts";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
@@ -535,7 +535,8 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
         ELECTRON_RUN_AS_NODE: "1",
         T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING: "1",
         T3CODE_CLI_PATH: Option.getOrUndefined(input.cliPath),
-        T3CODE_VOICE_SPEECH: resolveVoiceSpeechEnv({
+        T3CODE_VOICE_ENGINE: resolveHostVoiceEnv({
+          workerPath: environment.path.join(environment.dirname, "voice", "VoiceEngineWorker.cjs"),
           voiceDirectory: environment.path.join(environment.baseDir, "voice"),
           platform: environment.platform,
           binaryCandidates: environment.resolveResourcePathCandidates(

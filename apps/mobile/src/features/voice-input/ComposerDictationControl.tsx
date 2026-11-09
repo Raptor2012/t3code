@@ -434,8 +434,8 @@ export function ComposerDictationPrimaryAction(props: {
   return <ComposerDictationStartAction {...props} />;
 }
 
-/** Tap to dictate, tap again to stop. The reply to what you then send is read aloud. */
-export function ComposerTalkAction(props: {
+/** Tap to dictate, tap again to stop. Nothing sends by itself. */
+export function ComposerDictateAction(props: {
   readonly size?: "regular" | "large";
   readonly isAvailable: boolean;
   readonly disabled?: boolean;
@@ -450,7 +450,7 @@ export function ComposerTalkAction(props: {
   const iconSize = Math.round((props.size === "large" ? 20 : 16) * scale);
   return (
     <Pressable
-      accessibilityLabel={props.active ? "Stop talking" : "Talk to the voice agent"}
+      accessibilityLabel={props.active ? "Stop dictating" : "Dictate"}
       accessibilityRole="button"
       accessibilityState={{ busy: props.transcribing, disabled: props.disabled }}
       className="size-[44px] shrink-0 items-center justify-center active:opacity-70"
@@ -459,7 +459,7 @@ export function ComposerTalkAction(props: {
       style={{ opacity: props.disabled && !props.active ? 0.4 : 1 }}
     >
       <View
-        className="items-center justify-center rounded-full bg-primary"
+        className={`items-center justify-center rounded-full ${props.active ? "bg-primary" : ""}`}
         style={{ width: circleSize, height: circleSize }}
       >
         {props.transcribing ? (
@@ -468,14 +468,41 @@ export function ComposerTalkAction(props: {
           <CompactVoiceWaveform audioLevels={props.audioLevels} />
         ) : (
           <SymbolView
-            name="waveform"
+            name="mic"
             size={iconSize}
             weight="semibold"
-            tintColorClassName="accent-primary-foreground"
+            tintColorClassName="accent-icon"
             type="monochrome"
           />
         )}
       </View>
+    </Pressable>
+  );
+}
+
+/** Whether this thread's replies are read aloud. */
+export function ComposerReadAloudToggle(props: {
+  readonly size?: "regular" | "large";
+  readonly on: boolean;
+  readonly onPress: () => void;
+}) {
+  const { scale } = useAndroidControlSizing();
+  const iconSize = Math.round((props.size === "large" ? 20 : 16) * scale);
+  return (
+    <Pressable
+      accessibilityLabel={props.on ? "Stop reading replies aloud" : "Read replies aloud"}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: props.on }}
+      className="size-[44px] shrink-0 items-center justify-center active:opacity-70"
+      onPress={props.onPress}
+    >
+      <SymbolView
+        name={props.on ? "speaker.wave.2" : "speaker.slash"}
+        size={iconSize}
+        weight="semibold"
+        tintColorClassName={props.on ? "accent-primary" : "accent-icon"}
+        type="monochrome"
+      />
     </Pressable>
   );
 }

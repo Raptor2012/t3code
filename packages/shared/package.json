@@ -151,6 +151,18 @@
       "types": "./src/backgroundActivitySettings.ts",
       "import": "./src/backgroundActivitySettings.ts"
     },
+    "./dictationPreview": {
+      "types": "./src/dictationPreview.ts",
+      "import": "./src/dictationPreview.ts"
+    },
+    "./voiceEngineProcess": {
+      "types": "./src/voiceEngineProcess.ts",
+      "import": "./src/voiceEngineProcess.ts"
+    },
+    "./voiceEngineProtocol": {
+      "types": "./src/voiceEngineProtocol.ts",
+      "import": "./src/voiceEngineProtocol.ts"
+    },
     "./maeveSpeech": {
       "types": "./src/maeveSpeech.ts",
       "import": "./src/maeveSpeech.ts"

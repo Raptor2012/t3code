@@ -3160,6 +3160,14 @@ export const layerWsRpc = (
         [WS_METHODS.previewReportProfiles]: (input) => reportProfiles(input),
         [WS_METHODS.previewReportStatus]: (input) => previewManager.reportStatus(input),
         [WS_METHODS.subscribePreviewEvents]: (_input) => previewManager.events,
+        [WS_METHODS.voiceDictationStart]: (input) => voiceSpeech.dictationStart(input.sessionId),
+        [WS_METHODS.voiceDictationPush]: (input) =>
+          voiceSpeech
+            .dictationPush(input.sessionId, input.pcmBase64)
+            .pipe(Effect.map((text) => ({ text }))),
+        [WS_METHODS.voiceDictationFinish]: (input) =>
+          voiceSpeech.dictationFinish(input.sessionId).pipe(Effect.map((text) => ({ text }))),
+        [WS_METHODS.voiceDictationCancel]: (input) => voiceSpeech.dictationCancel(input.sessionId),
         [WS_METHODS.voiceSynthesize]: (input) =>
           voiceSpeech.synthesize(input.text).pipe(Effect.map((wavBase64) => ({ wavBase64 }))),
         [WS_METHODS.deviceConfigure]: (input) => deviceService.configure(input),

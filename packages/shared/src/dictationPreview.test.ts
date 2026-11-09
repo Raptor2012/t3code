@@ -1,7 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import { DictationPreview, type PreviewDecode } from "./dictationPreview.ts";
-import { followedVoiceOn } from "./voiceFollow.ts";
 
 const RATE = 16000;
 const seconds = (value: number) => new Float32Array(Math.round(RATE * value)).fill(0.1);
@@ -79,18 +78,5 @@ describe("DictationPreview", () => {
     preview.start();
     preview.push(seconds(12), true);
     expect(preview.request(1)?.samples.length).toBe(RATE * 8);
-  });
-});
-
-describe("followedVoiceOn", () => {
-  it("carries Maeve's state from the thread you were following", () => {
-    expect(followedVoiceOn({ a: true }, "a", undefined)).toBe(true);
-    expect(followedVoiceOn({ a: false, b: true }, "a", undefined)).toBe(false);
-  });
-
-  it("starts from the last thread, or on if any thread had Maeve on", () => {
-    expect(followedVoiceOn({ a: false, b: true }, undefined, "a")).toBe(false);
-    expect(followedVoiceOn({ a: false, b: true }, undefined, undefined)).toBe(true);
-    expect(followedVoiceOn(undefined, undefined, undefined)).toBe(false);
   });
 });

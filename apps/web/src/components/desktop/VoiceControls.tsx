@@ -1,10 +1,9 @@
 import type { DesktopVoiceBridge, DesktopVoiceState } from "@t3tools/contracts";
-import { AudioLinesIcon, MicIcon } from "lucide-react";
+import { MicIcon, Volume2Icon, VolumeOffIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { ComposerControl } from "../chat/ComposerControl";
-import { messageActionPillClassName } from "../chat/ComposerPrimaryActions";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 function useVoiceState(bridge: DesktopVoiceBridge | undefined) {
@@ -32,23 +31,24 @@ export function VoiceOrbSlot() {
   );
 }
 
-/** The message box's voice buttons: click to dictate, or to dictate and hear the reply. */
+/** The message box's voice buttons: click to dictate, and whether replies are read aloud. */
 export function VoiceControls() {
   const bridge = voiceBridge();
   const state = useVoiceState(bridge);
   if (!bridge || state === null) return null;
 
-  const dictateLabel = state.dictating && !state.talking ? "Stop dictating" : "Dictate";
-  const talkLabel = state.talking ? "Stop talking" : "Talk to the voice agent";
+  const dictateLabel = state.dictating ? "Stop dictating" : "Dictate";
+  const readAloudLabel = state.readAloud ? "Stop reading replies aloud" : "Read replies aloud";
+  const ReadAloudIcon = state.readAloud ? Volume2Icon : VolumeOffIcon;
   return (
     <div className="flex shrink-0 items-center gap-1">
       <Tooltip>
         <TooltipTrigger
           render={
             <ComposerControl
-              className={cn("shrink-0", state.dictating && !state.talking && "text-primary")}
+              className={cn("shrink-0", state.dictating && "text-primary")}
               aria-label={dictateLabel}
-              aria-pressed={state.dictating && !state.talking}
+              aria-pressed={state.dictating}
               onClick={() => bridge.command("toggle-dictation")}
             />
           }
@@ -60,22 +60,17 @@ export function VoiceControls() {
       <Tooltip>
         <TooltipTrigger
           render={
-            <button
-              type="button"
-              className={cn(
-                messageActionPillClassName,
-                "size-8 sm:size-7",
-                state.talking && "ring-2 ring-primary/40",
-              )}
-              aria-label={talkLabel}
-              aria-pressed={state.talking}
-              onClick={() => bridge.command("toggle-talk")}
+            <ComposerControl
+              className={cn("shrink-0", state.readAloud && "text-primary")}
+              aria-label={readAloudLabel}
+              aria-pressed={state.readAloud}
+              onClick={() => bridge.command("toggle-read-aloud")}
             />
           }
         >
-          <AudioLinesIcon className="size-4" aria-hidden="true" />
+          <ReadAloudIcon className="size-4" aria-hidden="true" />
         </TooltipTrigger>
-        <TooltipPopup side="top">{talkLabel}</TooltipPopup>
+        <TooltipPopup side="top">{readAloudLabel}</TooltipPopup>
       </Tooltip>
     </div>
   );

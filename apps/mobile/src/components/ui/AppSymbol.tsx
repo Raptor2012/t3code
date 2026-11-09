@@ -84,6 +84,8 @@ import IconLayoutSidebar from "@tabler/icons-react-native/IconLayoutSidebar";
 import IconLayoutSidebarRight from "@tabler/icons-react-native/IconLayoutSidebarRight";
 import IconLetterSpacing from "@tabler/icons-react-native/IconLetterSpacing";
 import IconMicrophone from "@tabler/icons-react-native/IconMicrophone";
+import IconVolume from "@tabler/icons-react-native/IconVolume";
+import IconVolumeOff from "@tabler/icons-react-native/IconVolumeOff";
 import IconWaveSine from "@tabler/icons-react-native/IconWaveSine";
 import IconLink from "@tabler/icons-react-native/IconLink";
 import IconListNumbers from "@tabler/icons-react-native/IconListNumbers";
@@ -230,6 +232,8 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   macstudio: IconDeviceDesktop,
   magnifyingglass: IconSearch,
   mic: IconMicrophone,
+  "speaker.wave.2": IconVolume,
+  "speaker.slash": IconVolumeOff,
   waveform: IconWaveSine,
   paintbrush: IconPalette,
   pencil: IconPencil,

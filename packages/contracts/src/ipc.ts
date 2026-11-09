@@ -1035,12 +1035,12 @@ export interface DesktopVoiceDock {
   readonly top: number;
 }
 
-export type DesktopVoiceCommand = "toggle-dictation" | "toggle-talk";
+export type DesktopVoiceCommand = "toggle-dictation" | "toggle-read-aloud";
 
 export interface DesktopVoiceState {
   readonly dictating: boolean;
-  /** The current dictation also asks for the thread's reply to be read aloud. */
-  readonly talking: boolean;
+  /** This thread's replies are read aloud. */
+  readonly readAloud: boolean;
   /** The orb is showing, so the message box keeps its space clear. */
   readonly orb: boolean;
 }

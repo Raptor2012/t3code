@@ -2,7 +2,7 @@
 // native code and CPU work never touch the Electron main process.
 import { cleanupDictation } from "./engine/cleanup.ts";
 import { type LlamaServer, startLlamaServer } from "./engine/llamaServer.ts";
-import type { VoiceEngineEvent, VoiceEngineRequest } from "./engine/protocol.ts";
+import type { VoiceEngineEvent, VoiceEngineRequest } from "@t3tools/shared/voiceEngineProtocol";
 import { type Speech, startSpeech } from "@t3tools/shared/maeveSpeech";
 import { loadSpeechToText, type SpeechToText } from "./engine/speechToText.ts";
 

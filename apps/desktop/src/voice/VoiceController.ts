@@ -17,9 +17,12 @@ import { ReplyReader } from "@t3tools/client-runtime/voice-input";
 import * as Electron from "electron";
 
 import * as IpcChannels from "../ipc/channels.ts";
-import { DictationPreview, type PreviewDecode } from "./dictationPreview.ts";
-import type { VoiceEngineConfig } from "./engine/protocol.ts";
-import { startVoiceEngineProcess, type VoiceEngineProcess } from "./VoiceEngineProcess.ts";
+import { DictationPreview, type PreviewDecode } from "@t3tools/shared/dictationPreview";
+import {
+  startVoiceEngineProcess,
+  type VoiceEngineProcess,
+} from "@t3tools/shared/voiceEngineProcess";
+import type { VoiceEngineConfig } from "@t3tools/shared/voiceEngineProtocol";
 import { startVoiceHotkeys, type VoiceHotkeyEvent } from "./VoiceHotkeys.ts";
 import { followedVoiceOn } from "./voiceFollow.ts";
 
@@ -36,7 +39,7 @@ const DOCK_OVERLAP = 18;
 
 type Delivery = "immediate" | "review" | "composer";
 type DictState = "" | "dictating" | "processing" | "done" | "failed";
-type DictationSource = "hotkey" | "dictate" | "talk";
+type DictationSource = "hotkey" | "button";
 
 interface Prefs {
   thread?: string;
@@ -801,19 +804,10 @@ export class VoiceController {
     switch (command) {
       case "toggle-dictation":
         if (this.recording) this.endDictation();
-        else void this.beginDictation("dictate");
+        else void this.beginDictation("button");
         break;
-      case "toggle-talk":
-        if (this.recording) {
-          this.endDictation();
-          break;
-        }
-        if (!this.target) break;
-        // Talking asks for a spoken reply, whatever the thread was set to.
-        this.setPrefs({
-          voiceThreads: { ...this.prefs.voiceThreads, [threadKey(this.target)]: true },
-        });
-        void this.beginDictation("talk");
+      case "toggle-read-aloud":
+        this.action("toggle_voice", []);
         break;
     }
   }
@@ -823,7 +817,7 @@ export class VoiceController {
     if (!main || main.isDestroyed()) return;
     const state: DesktopVoiceState = {
       dictating: this.recording,
-      talking: this.recording && this.dictationSource === "talk",
+      readAloud: this.voiceOn(),
       orb: this.visible,
     };
     const key = JSON.stringify(state);

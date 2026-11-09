@@ -3,7 +3,7 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-import type { VoiceEngineConfig } from "./engine/protocol.ts";
+import type { VoiceEngineConfig } from "@t3tools/shared/voiceEngineProtocol";
 
 /** `<voice dir>/models.json` overrides any of these; paths default to the starter-pack layout. */
 export interface VoiceModelPaths {
@@ -87,16 +87,20 @@ export function resolveVoiceEngineConfig(input: {
   };
 }
 
-/** What the local server needs to read replies aloud for phones, or undefined without voice. */
-export function resolveVoiceSpeechEnv(input: {
+/** What the local server needs to run voice for phones, or undefined without voice. */
+export function resolveHostVoiceEnv(input: {
   readonly voiceDirectory: string;
   readonly platform: NodeJS.Platform;
   readonly binaryCandidates: readonly string[];
+  readonly workerPath: string;
 }): string | undefined {
   const models = resolveVoiceEngineConfig({
     voiceDirectory: input.voiceDirectory,
     platform: input.platform,
     speechBinary: spawnableFile(input.binaryCandidates),
   });
-  return models.ok ? JSON.stringify(models.config.speech) : undefined;
+  if (!models.ok) return undefined;
+  // No cleanup model: the desktop already holds one on the GPU, and phones want the quickest text.
+  const { speechToText, speech } = models.config;
+  return JSON.stringify({ workerPath: input.workerPath, config: { speechToText, speech } });
 }

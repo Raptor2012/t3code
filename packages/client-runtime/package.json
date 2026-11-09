@@ -131,6 +131,10 @@
       "types": "./src/providerUpdateRequiredModels.ts",
       "default": "./src/providerUpdateRequiredModels.ts"
     },
+    "./voice-input/dictatedPrompt": {
+      "types": "./src/voice-input/dictatedPrompt.ts",
+      "default": "./src/voice-input/dictatedPrompt.ts"
+    },
     "./voice-input": {
       "types": "./src/voice-input/index.ts",
       "default": "./src/voice-input/index.ts"

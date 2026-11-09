@@ -1,7 +1,7 @@
 // Messages between the desktop main process and the voice engine worker (a forked Node child
 // with advanced serialization, so typed arrays cross without copying into JSON).
 
-import type { PreviewDecode } from "../dictationPreview.ts";
+import type { PreviewDecode } from "./dictationPreview.ts";
 
 export interface VoiceEngineConfig {
   readonly speechToText: { readonly modelDir: string; readonly threads?: number };

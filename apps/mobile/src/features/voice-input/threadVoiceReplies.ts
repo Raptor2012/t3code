@@ -23,6 +23,7 @@ export class VoiceReplyFollower {
   private readonly reader = new ReplyReader();
   private readonly seen = new Set<string>();
   private armed = false;
+  private primed = false;
 
   constructor(speak: (text: string) => void) {
     this.speak = speak;
@@ -41,6 +42,13 @@ export class VoiceReplyFollower {
   }
 
   update(messages: ReadonlyArray<VoiceReplyMessage>): void {
+    // Whatever is there when the thread first loads is history, even with read-aloud on.
+    if (!this.primed) {
+      if (messages.length === 0) return;
+      this.primed = true;
+      for (const message of messages) this.seen.add(message.id);
+      return;
+    }
     for (const message of messages) {
       if (message.role !== "assistant") continue;
       if (!this.armed) {
@@ -110,7 +118,7 @@ export function threadVoiceReplies(ref: ScopedThreadRef | null): Atom.Atom<void>
 }
 
 export function armVoiceReplies(ref: ScopedThreadRef): void {
-  followers.get(threadKey(ref))?.arm();
+  followerFor(threadKey(ref)).arm();
   notify();
 }
 

@@ -31,6 +31,15 @@ describe("VoiceReplyFollower", () => {
     expect(spoken).toEqual([]);
   });
 
+  it("treats a thread's first load as history even when already armed", () => {
+    const { spoken, follower } = setup();
+    follower.arm();
+    follower.update([]);
+    follower.update([assistant("a", "Old reply.")]);
+    follower.update([assistant("a", "Old reply."), assistant("b", "New reply.")]);
+    expect(spoken).toEqual(["New reply."]);
+  });
+
   it("reads only replies that arrive after arming, a sentence at a time", () => {
     const { spoken, follower } = setup();
     follower.update([assistant("a", "Old reply.")]);
@@ -42,6 +51,7 @@ describe("VoiceReplyFollower", () => {
 
   it("ignores the user's messages and goes quiet when disarmed", () => {
     const { spoken, follower } = setup();
+    follower.update([{ id: "first", role: "user", text: "Hi.", streaming: false }]);
     follower.arm();
     follower.update([{ id: "u", role: "user", text: "Hello.", streaming: false }]);
     follower.disarm();

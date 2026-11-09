@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { encodeWav } from "./VoiceSpeech.ts";
+import { decodePcm16, encodeWav } from "./VoiceSpeech.ts";
 
 describe("encodeWav", () => {
   it("writes mono 16-bit audio across chunks and clamps out-of-range samples", () => {
@@ -11,5 +11,12 @@ describe("encodeWav", () => {
     expect([wav.readInt16LE(44), wav.readInt16LE(46), wav.readInt16LE(48)]).toEqual([
       0, 32767, -32767,
     ]);
+  });
+});
+
+describe("decodePcm16", () => {
+  it("reads little-endian samples and ignores a trailing odd byte", () => {
+    const pcm = Buffer.from([0x00, 0x40, 0x00, 0xc0, 0x7f]);
+    expect([...decodePcm16(pcm)]).toEqual([0.5, -0.5]);
   });
 });

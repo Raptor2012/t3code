@@ -12,8 +12,8 @@ import { useEffect, useRef, useState } from "react";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useHandleNewThread } from "../../hooks/useHandleNewThread";
 import { useStableCallback } from "../../hooks/useStableCallback";
+import { composeDictatedPrompt } from "@t3tools/client-runtime/voice-input/dictatedPrompt";
 import {
-  composeDictatedPrompt,
   dispatchVoiceDictation,
   focusedTextField,
   measureVoiceDock,

@@ -9,7 +9,7 @@ import type {
   VoiceEngineConfig,
   VoiceEngineEvent,
   VoiceEngineRequest,
-} from "./engine/protocol.ts";
+} from "./voiceEngineProtocol.ts";
 
 export interface VoiceEngineReady {
   readonly sampleRate: number;

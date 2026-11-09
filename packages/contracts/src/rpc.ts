@@ -496,6 +496,10 @@ export const WS_METHODS = {
   deviceAction: "device.action",
 
   voiceSynthesize: "voice.synthesize",
+  voiceDictationStart: "voice.dictationStart",
+  voiceDictationPush: "voice.dictationPush",
+  voiceDictationFinish: "voice.dictationFinish",
+  voiceDictationCancel: "voice.dictationCancel",
 
   serverProbe: "server.probe",
   serverGetConfig: "server.getConfig",
@@ -648,6 +652,33 @@ const WsVoiceSynthesizeRpc = Rpc.make(WS_METHODS.voiceSynthesize, {
   payload: Schema.Struct({ text: TrimmedNonEmptyString.check(Schema.isMaxLength(4_000)) }),
   success: Schema.Struct({ wavBase64: Schema.String }),
   error: Schema.Union([VoiceSpeechError, EnvironmentAuthorizationError]),
+});
+
+const VoiceDictationSessionId = TrimmedNonEmptyString.check(Schema.isMaxLength(64));
+
+const WsVoiceDictationStartRpc = Rpc.make(WS_METHODS.voiceDictationStart, {
+  payload: Schema.Struct({ sessionId: VoiceDictationSessionId }),
+  error: Schema.Union([VoiceSpeechError, EnvironmentAuthorizationError]),
+});
+
+const WsVoiceDictationPushRpc = Rpc.make(WS_METHODS.voiceDictationPush, {
+  payload: Schema.Struct({
+    sessionId: VoiceDictationSessionId,
+    pcmBase64: Schema.String.check(Schema.isMaxLength(2_000_000)),
+  }),
+  success: Schema.Struct({ text: Schema.String }),
+  error: Schema.Union([VoiceSpeechError, EnvironmentAuthorizationError]),
+});
+
+const WsVoiceDictationFinishRpc = Rpc.make(WS_METHODS.voiceDictationFinish, {
+  payload: Schema.Struct({ sessionId: VoiceDictationSessionId }),
+  success: Schema.Struct({ text: Schema.String }),
+  error: Schema.Union([VoiceSpeechError, EnvironmentAuthorizationError]),
+});
+
+const WsVoiceDictationCancelRpc = Rpc.make(WS_METHODS.voiceDictationCancel, {
+  payload: Schema.Struct({ sessionId: VoiceDictationSessionId }),
+  error: EnvironmentAuthorizationError,
 });
 
 export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
@@ -2001,6 +2032,10 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 
 export const WsRpcGroup = RpcGroup.make(
   WsVoiceSynthesizeRpc,
+  WsVoiceDictationStartRpc,
+  WsVoiceDictationPushRpc,
+  WsVoiceDictationFinishRpc,
+  WsVoiceDictationCancelRpc,
   WsGuestShareCreateRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,

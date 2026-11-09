@@ -2,7 +2,7 @@
 
 import * as NodePath from "node:path";
 
-import type { PreviewDecode } from "../dictationPreview.ts";
+import type { PreviewDecode } from "@t3tools/shared/dictationPreview";
 
 export interface SpeechToTextOptions {
   /** A sherpa-onnx NeMo transducer folder: encoder, decoder and joiner (int8) plus tokens.txt. */
