@@ -219,6 +219,10 @@
       "types": "./src/state/presentation.ts",
       "default": "./src/state/presentation.ts"
     },
+    "./state/voiceSpeech": {
+      "types": "./src/state/voiceSpeech.ts",
+      "default": "./src/state/voiceSpeech.ts"
+    },
     "./state/device": {
       "types": "./src/state/device.ts",
       "default": "./src/state/device.ts"

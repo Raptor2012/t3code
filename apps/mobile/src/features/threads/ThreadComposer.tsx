@@ -110,9 +110,18 @@ import {
   ComposerDictationError,
   ComposerDictationPrimaryAction,
   ComposerDictationStartAction,
+  ComposerTalkAction,
   ComposerDictationStatus,
   ComposerDictationToolbar,
 } from "../voice-input/ComposerDictationControl";
+import {
+  armVoiceReplies,
+  disarmVoiceReplies,
+  stopSpokenReply,
+  useVoiceAgentActivity,
+} from "../voice-input/threadVoiceReplies";
+import { VoiceOrb } from "../voice-input/VoiceOrb";
+import type { VoiceOrbState } from "../voice-input/voiceOrbPage";
 import { useVoiceInputController } from "../voice-input/useVoiceInputController";
 import { resolveVoiceComposerPresentation } from "../voice-input/voiceInputPresentation";
 import type { ExistingThreadSettingsRouteParams } from "./ThreadSettingsSheet";
@@ -577,7 +586,26 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     voiceInput.state,
     voiceInput.elapsedSeconds,
   );
-  const isVoiceInputPresented = voicePresentation.statusKind === "active";
+  // Talking keeps the normal toolbar, so the button that stops it stays where it was tapped.
+  const [talking, setTalking] = useState(false);
+  const spokenTurn = useRef(false);
+  const voiceRepliesRef = {
+    environmentId: props.environmentId,
+    threadId: props.selectedThread.id,
+  };
+  const isVoiceInputPresented = voicePresentation.statusKind === "active" && !talking;
+  const voiceAgent = useVoiceAgentActivity(voiceRepliesRef);
+  const voicePhase = voiceInput.state.phase;
+  const voiceOrbState: VoiceOrbState | null =
+    voicePhase === "preparing" || voicePhase === "recording"
+      ? "dictating"
+      : voicePhase === "transcribing"
+        ? "processing"
+        : voiceAgent.speaking
+          ? "speaking"
+          : voiceAgent.armed && props.selectedThread.runtime?.activeRunId
+            ? "thinking"
+            : null;
   const isExpanded = isFocused || settingsSheetPresentation.keepsComposerExpanded;
   const { layout, setComposerEditing } = useAdaptiveWorkspaceLayout();
   const floatingSidebarComposer = useAndroidFloatingTabs() && layout.usesSplitView;
@@ -661,6 +689,18 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     onEditorFocusChange?.(false);
     setComposerEditing(false);
   };
+  const toggleTalk = () => {
+    if (!talking) {
+      stopSpokenReply();
+      spokenTurn.current = true;
+      setTalking(true);
+      voiceInput.start();
+    } else if (voicePhase === "recording") {
+      void voiceInput.stop();
+    } else if (voicePhase !== "transcribing") {
+      voiceInput.cancel();
+    }
+  };
   const handleSend = async (followUp?: ActiveTurnComposerAction) => {
     if (
       isSubmissionLocked ||
@@ -676,6 +716,9 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
     if (inFlightThreadIdsRef.current.has(threadKey)) return;
     inFlightThreadIdsRef.current.add(threadKey);
+    if (spokenTurn.current) armVoiceReplies(voiceRepliesRef);
+    else disarmVoiceReplies(voiceRepliesRef);
+    spokenTurn.current = false;
     const draftAtSend = getComposerDraftSnapshot(composerDraftKey);
     const stillSendable = () => {
       const draft = getComposerDraftSnapshot(composerDraftKey);
@@ -703,6 +746,18 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       projectTitle: props.environmentLabel ?? "T3 Code",
     });
   };
+  const talkSawActivity = useRef(false);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the voice recorder's async phases, which end a talking turn outside React
+  useEffect(() => {
+    if (!talking) {
+      talkSawActivity.current = false;
+      return;
+    }
+    if (voicePhase !== "idle" && voicePhase !== "error") talkSawActivity.current = true;
+    else if (voicePhase === "error" || talkSawActivity.current) {
+      setTalking(false);
+    }
+  }, [talking, voicePhase]);
 
   const lockedProviderInstanceId = props.canSwitchProvider
     ? undefined
@@ -871,6 +926,10 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
             tone="text"
             onPress={openSettings}
           />
+        ) : null}
+
+        {voiceOrbState ? (
+          <VoiceOrb state={voiceOrbState} audioLevels={voiceInput.audioLevels} />
         ) : null}
 
         <ComposerSurface
@@ -1093,6 +1152,15 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                   disabled={isSubmissionLocked}
                   onStart={voiceInput.start}
                   onCancel={voiceInput.cancel}
+                />
+                <ComposerTalkAction
+                  size={usesLargeControls ? "large" : "regular"}
+                  isAvailable={voiceInput.isAvailable}
+                  disabled={isSubmissionLocked}
+                  active={talking}
+                  transcribing={talking && voicePhase === "transcribing"}
+                  audioLevels={voiceInput.audioLevels}
+                  onPress={toggleTalk}
                 />
                 {showStopAction ? (
                   <ComposerActionButton

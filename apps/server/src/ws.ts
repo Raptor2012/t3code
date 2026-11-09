@@ -191,6 +191,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import { terminalOutputStream, withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as DeviceService from "./device/DeviceService.ts";
+import * as VoiceSpeech from "./voice/VoiceSpeech.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -1402,6 +1403,7 @@ export const layerWsRpc = (
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
+      const voiceSpeech = yield* VoiceSpeech.VoiceSpeech;
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
       const orchestrationEngine = yield* Orchestrator.OrchestratorV2;
@@ -3158,6 +3160,8 @@ export const layerWsRpc = (
         [WS_METHODS.previewReportProfiles]: (input) => reportProfiles(input),
         [WS_METHODS.previewReportStatus]: (input) => previewManager.reportStatus(input),
         [WS_METHODS.subscribePreviewEvents]: (_input) => previewManager.events,
+        [WS_METHODS.voiceSynthesize]: (input) =>
+          voiceSpeech.synthesize(input.text).pipe(Effect.map((wavBase64) => ({ wavBase64 }))),
         [WS_METHODS.deviceConfigure]: (input) => deviceService.configure(input),
         [WS_METHODS.deviceTestHost]: (input) => deviceService.testHost(input),
         [WS_METHODS.deviceEasAccount]: (input) => deviceService.easAccount(input),

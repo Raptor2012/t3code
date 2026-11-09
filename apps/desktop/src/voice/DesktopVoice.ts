@@ -12,7 +12,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { VoiceController } from "./VoiceController.ts";
-import { resolveVoiceEngineConfig } from "./voiceModels.ts";
+import { resolveVoiceEngineConfig, spawnableFile } from "./voiceModels.ts";
 
 const { logInfo, logWarning } = DesktopObservability.makeComponentLogger("desktop-voice");
 
@@ -34,21 +34,16 @@ const make = Effect.gen(function* () {
   const controllerRef = yield* Ref.make<VoiceController | undefined>(undefined);
   const path = environment.path;
 
-  // Electron reports files inside app.asar as existing, but an executable there cannot be spawned.
-  const resource = (name: string, { executable = false } = {}) =>
-    environment
-      .resolveResourcePathCandidates(name)
-      .find(
-        (candidate) =>
-          !(executable && /\.asar([\\/]|$)/.test(candidate)) && NodeFS.existsSync(candidate),
-      );
+  const resource = (name: string) =>
+    environment.resolveResourcePathCandidates(name).find((path) => NodeFS.existsSync(path));
 
   const initialize = Effect.gen(function* () {
     if ((yield* Ref.get(controllerRef)) !== undefined) return;
     const voiceDirectory = path.join(environment.baseDir, "voice");
-    const speechBinary = resource(
-      path.join("voice", environment.platform === "win32" ? "t3-maeve-tts.exe" : "t3-maeve-tts"),
-      { executable: true },
+    const speechBinary = spawnableFile(
+      environment.resolveResourcePathCandidates(
+        path.join("voice", environment.platform === "win32" ? "t3-maeve-tts.exe" : "t3-maeve-tts"),
+      ),
     );
     const orbPage = resource(path.join("voice", "orb.html"));
     if (!orbPage) {

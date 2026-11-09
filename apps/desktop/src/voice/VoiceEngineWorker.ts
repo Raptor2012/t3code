@@ -3,7 +3,7 @@
 import { cleanupDictation } from "./engine/cleanup.ts";
 import { type LlamaServer, startLlamaServer } from "./engine/llamaServer.ts";
 import type { VoiceEngineEvent, VoiceEngineRequest } from "./engine/protocol.ts";
-import { type Speech, startSpeech } from "./engine/speech.ts";
+import { type Speech, startSpeech } from "@t3tools/shared/maeveSpeech";
 import { loadSpeechToText, type SpeechToText } from "./engine/speechToText.ts";
 
 const send = (event: VoiceEngineEvent) => {

@@ -24,20 +24,22 @@ export function VoiceOrbSlot() {
     <div
       aria-hidden="true"
       data-voice-orb-slot="true"
-      className="pointer-events-none h-24 bg-linear-to-t from-background from-85% to-transparent"
+      className={cn(
+        "pointer-events-none bg-linear-to-t from-background from-85% to-transparent transition-all duration-200",
+        state.orb ? "h-24" : "h-0",
+      )}
     />
   );
 }
 
-/** The message box's voice buttons: click to dictate, hold to talk to the agent. */
+/** The message box's voice buttons: click to dictate, or to dictate and hear the reply. */
 export function VoiceControls() {
   const bridge = voiceBridge();
   const state = useVoiceState(bridge);
   if (!bridge || state === null) return null;
 
-  const startTalking = () => bridge.command("talk-start");
-  const stopTalking = () => bridge.command("talk-end");
   const dictateLabel = state.dictating && !state.talking ? "Stop dictating" : "Dictate";
+  const talkLabel = state.talking ? "Stop talking" : "Talk to the voice agent";
   return (
     <div className="flex shrink-0 items-center gap-1">
       <Tooltip>
@@ -62,33 +64,18 @@ export function VoiceControls() {
               type="button"
               className={cn(
                 messageActionPillClassName,
-                "size-8 touch-none select-none sm:size-7",
+                "size-8 sm:size-7",
                 state.talking && "ring-2 ring-primary/40",
               )}
-              aria-label="Hold to talk to the voice agent"
+              aria-label={talkLabel}
               aria-pressed={state.talking}
-              onPointerDown={(event) => {
-                if (event.button !== 0) return;
-                event.currentTarget.setPointerCapture(event.pointerId);
-                startTalking();
-              }}
-              onPointerUp={stopTalking}
-              onPointerCancel={stopTalking}
-              onLostPointerCapture={stopTalking}
-              onKeyDown={(event) => {
-                if ((event.key !== " " && event.key !== "Enter") || event.repeat) return;
-                event.preventDefault();
-                startTalking();
-              }}
-              onKeyUp={(event) => {
-                if (event.key === " " || event.key === "Enter") stopTalking();
-              }}
+              onClick={() => bridge.command("toggle-talk")}
             />
           }
         >
           <AudioLinesIcon className="size-4" aria-hidden="true" />
         </TooltipTrigger>
-        <TooltipPopup side="top">Hold to talk</TooltipPopup>
+        <TooltipPopup side="top">{talkLabel}</TooltipPopup>
       </Tooltip>
     </div>
   );

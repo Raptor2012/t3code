@@ -434,6 +434,52 @@ export function ComposerDictationPrimaryAction(props: {
   return <ComposerDictationStartAction {...props} />;
 }
 
+/** Tap to dictate, tap again to stop. The reply to what you then send is read aloud. */
+export function ComposerTalkAction(props: {
+  readonly size?: "regular" | "large";
+  readonly isAvailable: boolean;
+  readonly disabled?: boolean;
+  readonly active: boolean;
+  readonly transcribing: boolean;
+  readonly audioLevels: SharedValue<ReadonlyArray<number>>;
+  readonly onPress: () => void;
+}) {
+  const { scale } = useAndroidControlSizing();
+  if (!props.isAvailable) return null;
+  const circleSize = Math.round((props.size === "large" ? 44 : 30) * scale);
+  const iconSize = Math.round((props.size === "large" ? 20 : 16) * scale);
+  return (
+    <Pressable
+      accessibilityLabel={props.active ? "Stop talking" : "Talk to the voice agent"}
+      accessibilityRole="button"
+      accessibilityState={{ busy: props.transcribing, disabled: props.disabled }}
+      className="size-[44px] shrink-0 items-center justify-center active:opacity-70"
+      disabled={props.disabled && !props.active}
+      onPress={props.onPress}
+      style={{ opacity: props.disabled && !props.active ? 0.4 : 1 }}
+    >
+      <View
+        className="items-center justify-center rounded-full bg-primary"
+        style={{ width: circleSize, height: circleSize }}
+      >
+        {props.transcribing ? (
+          <AppActivityIndicator size="small" colorClassName="accent-primary-foreground" />
+        ) : props.active ? (
+          <CompactVoiceWaveform audioLevels={props.audioLevels} />
+        ) : (
+          <SymbolView
+            name="waveform"
+            size={iconSize}
+            weight="semibold"
+            tintColorClassName="accent-primary-foreground"
+            type="monochrome"
+          />
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
 export function ComposerDictationStartAction(props: {
   readonly size?: "regular" | "large";
   readonly state: VoiceInputState;

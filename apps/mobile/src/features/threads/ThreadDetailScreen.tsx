@@ -161,6 +161,7 @@ import {
 } from "../../state/threads";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { threadStreamHaptics } from "./threadStreamHaptics";
+import { threadVoiceReplies, useHostVoice } from "../voice-input/threadVoiceReplies";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { orchestrationEnvironment } from "../../state/orchestration";
 import { useDelayedStatus } from "../../lib/useDelayedStatus";
@@ -1210,6 +1211,8 @@ function ThreadDetailBody(
   );
   const selectedInstanceId = props.selectedThread.modelSelection.instanceId;
   useAtomMount(threadStreamHaptics(props.selectedThreadDetailRef));
+  useAtomMount(threadVoiceReplies(props.selectedThreadDetailRef));
+  useHostVoice(props.environmentId);
   const selectedProviderSkills = (() => {
     const provider = props.serverConfig?.providers.find(
       (candidate) => candidate.instanceId === selectedInstanceId,

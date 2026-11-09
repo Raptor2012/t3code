@@ -1847,7 +1847,12 @@ export default function ChatView(props: ChatViewProps) {
       }
       request.handled = true;
       composer.setVoiceText(
-        composeDictatedPrompt(composer.readSnapshot().value, request.text, request.replaces),
+        composeDictatedPrompt(
+          composer.readSnapshot().value,
+          request.text,
+          request.replaces,
+          request.live,
+        ),
       );
     },
   );

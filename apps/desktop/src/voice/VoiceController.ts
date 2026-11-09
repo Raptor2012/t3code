@@ -13,12 +13,12 @@ import type {
   DesktopVoiceReply,
   DesktopVoiceThread,
 } from "@t3tools/contracts";
+import { ReplyReader } from "@t3tools/client-runtime/voice-input";
 import * as Electron from "electron";
 
 import * as IpcChannels from "../ipc/channels.ts";
 import { DictationPreview, type PreviewDecode } from "./dictationPreview.ts";
 import type { VoiceEngineConfig } from "./engine/protocol.ts";
-import { ReplyReader } from "./replyText.ts";
 import { startVoiceEngineProcess, type VoiceEngineProcess } from "./VoiceEngineProcess.ts";
 import { startVoiceHotkeys, type VoiceHotkeyEvent } from "./VoiceHotkeys.ts";
 import { followedVoiceOn } from "./voiceFollow.ts";
@@ -36,6 +36,7 @@ const DOCK_OVERLAP = 18;
 
 type Delivery = "immediate" | "review" | "composer";
 type DictState = "" | "dictating" | "processing" | "done" | "failed";
+type DictationSource = "hotkey" | "dictate" | "talk";
 
 interface Prefs {
   thread?: string;
@@ -124,8 +125,10 @@ export class VoiceController {
   private readonly preview = new DictationPreview();
   private recording = false;
   private recordedWaiter: ((samples: Float32Array | undefined) => void) | undefined;
-  /** The last dictation placed in a composer, which the next one replaces while unsent. */
+  /** The words this dictation has placed in a composer, which its next update replaces. */
   private composerDraft: { key: string; text: string } | undefined;
+  /** A draft still under review when this dictation began; the new words add to it. */
+  private carriedDraft = "";
 
   private review: Review | null = null;
   private reviewSeq = 0;
@@ -169,7 +172,7 @@ export class VoiceController {
   private home = "";
   private dock: DesktopVoiceDock | null = null;
   private docked = false;
-  private talking = false;
+  private dictationSource: DictationSource = "hotkey";
   private pushedState = "";
   private liveWords: Promise<unknown> | undefined;
 
@@ -270,11 +273,13 @@ export class VoiceController {
     else this.endDictation();
   }
 
-  private async beginDictation(talking = false): Promise<void> {
+  private async beginDictation(source: DictationSource = "hotkey"): Promise<void> {
     if (this.recording || !this.engine || this.prefs.micMuted || this.review?.sending) return;
-    this.talking = talking;
+    this.dictationSource = source;
     this.stopSpeech(true);
-    // A new dictation replaces an unsent draft, so its live words are never hidden behind it.
+    // Dictations add up. A draft under review stays the base, in the composer and in the new card.
+    this.carriedDraft = this.review?.text ?? "";
+    if (!this.carriedDraft) this.composerDraft = undefined;
     if (this.review) {
       this.review = null;
       this.setFocus(false);
@@ -298,8 +303,10 @@ export class VoiceController {
       const shown = this.preview.complete(request.session, decode);
       if (!shown || this.review) return;
       this.dictPreviewText = shown.slice(-1200);
-      if (this.target && this.docked) {
-        this.liveWords = this.deliver(this.target, shown, "live").catch(() => undefined);
+      if (this.target && this.staysInComposer()) {
+        this.liveWords = this.deliver(this.target, this.withCarried(shown), "live").catch(
+          () => undefined,
+        );
       }
     };
     engine
@@ -318,6 +325,15 @@ export class VoiceController {
     });
     this.window?.webContents.send("voice-orb:record-stop");
     void recorded.then((samples) => this.finishDictation(session, samples));
+  }
+
+  // Dictating from inside T3 only ever fills the box; sending stays the user's call.
+  private staysInComposer(): boolean {
+    return this.docked || this.dictationSource !== "hotkey";
+  }
+
+  private withCarried(text: string): string {
+    return this.carriedDraft ? `${this.carriedDraft} ${text}` : text;
   }
 
   private async finishDictation(session: number, samples: Float32Array | undefined) {
@@ -353,7 +369,7 @@ export class VoiceController {
     this.dictUntil = Date.now() + 4000;
   }
 
-  private async deliverDictation(session: number, text: string) {
+  private async deliverDictation(session: number, spoken: string) {
     const target = this.target;
     if (!target) {
       this.failDictation("Open a thread in T3 Code first.");
@@ -363,8 +379,9 @@ export class VoiceController {
     await this.liveWords;
     this.liveWords = undefined;
     if (session !== this.dictSession) return;
-    const delivery = this.talking ? "immediate" : (this.prefs.delivery ?? "review");
-    if (delivery === "review" && !this.docked) {
+    const text = this.withCarried(spoken);
+    const delivery = this.staysInComposer() ? "composer" : (this.prefs.delivery ?? "review");
+    if (delivery === "review") {
       // Lands in the field you were typing in first, while T3 still has the keyboard.
       await this.deliver(target, text, "composer").catch((error: Error) =>
         this.options.log("voice dictation not placed", { error: error.message }),
@@ -784,18 +801,19 @@ export class VoiceController {
     switch (command) {
       case "toggle-dictation":
         if (this.recording) this.endDictation();
-        else void this.beginDictation();
+        else void this.beginDictation("dictate");
         break;
-      case "talk-start":
+      case "toggle-talk":
+        if (this.recording) {
+          this.endDictation();
+          break;
+        }
         if (!this.target) break;
-        // Holding the button asks for a spoken reply, whatever the thread was set to.
+        // Talking asks for a spoken reply, whatever the thread was set to.
         this.setPrefs({
           voiceThreads: { ...this.prefs.voiceThreads, [threadKey(this.target)]: true },
         });
-        void this.beginDictation(true);
-        break;
-      case "talk-end":
-        this.endDictation();
+        void this.beginDictation("talk");
         break;
     }
   }
@@ -805,7 +823,8 @@ export class VoiceController {
     if (!main || main.isDestroyed()) return;
     const state: DesktopVoiceState = {
       dictating: this.recording,
-      talking: this.recording && this.talking,
+      talking: this.recording && this.dictationSource === "talk",
+      orb: this.visible,
     };
     const key = JSON.stringify(state);
     if (key === this.pushedState) return;
@@ -815,16 +834,28 @@ export class VoiceController {
 
   // A message the user sent themselves from T3 settles the draft under review.
   private onUserMessage(thread: Pick<DesktopVoiceThread, "environmentId" | "threadId">) {
+    if (this.target && threadKey(this.target) === threadKey(thread)) {
+      // Sending mid-dictation ends it; words arriving after that would refill the emptied box.
+      if (this.recording || this.dictState === "processing") this.abandonDictation();
+      this.composerDraft = undefined;
+    }
     const review = this.review;
     if (!review || review.sending || threadKey(review.target) !== threadKey(thread)) return;
     this.review = null;
-    this.composerDraft = undefined;
     this.setFocus(false);
   }
 
+  private abandonDictation() {
+    this.dictSession++;
+    this.dictState = "";
+    this.preview.stop();
+    if (!this.recording) return;
+    this.recording = false;
+    this.window?.webContents.send("voice-orb:record-stop");
+  }
+
   private wantsVisible(now: number): boolean {
-    if (this.docked) return true;
-    if (this.agentActivity === "approval" || this.agentActivity === "input") return true;
+    if (this.voiceOn() && this.agentActivity !== "") return true;
     if (
       this.review ||
       this.prefs.dock ||

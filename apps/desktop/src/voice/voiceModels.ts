@@ -33,6 +33,13 @@ function defaultVoiceModelPaths(
   };
 }
 
+/** The first path that can really be run: files inside app.asar exist but cannot be spawned. */
+export function spawnableFile(candidates: readonly string[]): string | undefined {
+  return candidates.find(
+    (candidate) => !/\.asar([\\/]|$)/.test(candidate) && NodeFS.existsSync(candidate),
+  );
+}
+
 export type VoiceModelResolution =
   | { readonly ok: true; readonly config: VoiceEngineConfig }
   | { readonly ok: false; readonly missing: readonly string[] };
@@ -78,4 +85,18 @@ export function resolveVoiceEngineConfig(input: {
       },
     },
   };
+}
+
+/** What the local server needs to read replies aloud for phones, or undefined without voice. */
+export function resolveVoiceSpeechEnv(input: {
+  readonly voiceDirectory: string;
+  readonly platform: NodeJS.Platform;
+  readonly binaryCandidates: readonly string[];
+}): string | undefined {
+  const models = resolveVoiceEngineConfig({
+    voiceDirectory: input.voiceDirectory,
+    platform: input.platform,
+    speechBinary: spawnableFile(input.binaryCandidates),
+  });
+  return models.ok ? JSON.stringify(models.config.speech) : undefined;
 }

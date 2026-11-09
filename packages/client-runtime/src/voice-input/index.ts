@@ -9,6 +9,7 @@ export {
   type VoiceRecorder,
   type VoiceRecorderStatus,
 } from "./controller.ts";
+export { ReplyReader } from "./replyText.ts";
 export {
   VoiceTranscriptionError,
   throwIfVoiceTranscriptionAborted,

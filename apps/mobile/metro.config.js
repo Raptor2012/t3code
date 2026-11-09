@@ -18,6 +18,7 @@ const licenseGeneratorSource = path.join(
 const escapedWorkspaceRoot = workspaceRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const generatedDeviceStreamRoot = path.join(__dirname, ".generated", "device-stream");
 const generatedPreviewStreamRoot = path.join(__dirname, ".generated", "preview-stream");
+const generatedVoiceOrbRoot = path.join(__dirname, ".generated", "voice-orb");
 
 config.watchFolders = [...new Set([...(config.watchFolders ?? []), workspaceRoot])];
 config.resolver = {
@@ -35,6 +36,7 @@ config.resolver = {
     "@t3tools/mobile-third-party-licenses": generatedLicenseModuleRoot,
     "@t3tools/mobile-device-stream": generatedDeviceStreamRoot,
     "@t3tools/mobile-preview-stream": generatedPreviewStreamRoot,
+    "@t3tools/mobile-voice-orb": generatedVoiceOrbRoot,
   },
 };
 
@@ -67,6 +69,27 @@ async function generateMobileThirdPartyLicenses() {
       path.join(generatedLicenseModuleRoot, "package.json"),
       '{"main":"index.js"}\n',
     ),
+  ]);
+}
+
+// The phone draws the same orb as the desktop, so its shaders come from the desktop's page.
+async function generateVoiceOrbShaders() {
+  const page = await fs.promises.readFile(
+    path.join(workspaceRoot, "apps", "desktop", "resources", "voice", "orb.html"),
+    "utf8",
+  );
+  const shader = (id) => {
+    const match = new RegExp(`<script id="${id}"[^>]*>([\\s\\S]*?)</script>`).exec(page);
+    if (!match) throw new Error(`orb.html has no ${id} shader`);
+    return match[1];
+  };
+  await fs.promises.mkdir(generatedVoiceOrbRoot, { recursive: true });
+  await Promise.all([
+    writeFileIfChanged(
+      path.join(generatedVoiceOrbRoot, "index.js"),
+      `module.exports = { default: ${JSON.stringify({ vertex: shader("vs"), fragment: shader("fs") })}, __esModule: true };\n`,
+    ),
+    writeFileIfChanged(path.join(generatedVoiceOrbRoot, "package.json"), '{"main":"index.js"}\n'),
   ]);
 }
 
@@ -110,11 +133,14 @@ async function prepareStreamScripts() {
   }
 }
 
-module.exports = Promise.all([generateMobileThirdPartyLicenses(), prepareStreamScripts()]).then(
-  () =>
-    withUniwindConfig(config, {
-      cssEntryFile: "./global.css",
-      extraThemes,
-      polyfills: { rem: 14 },
-    }),
+module.exports = Promise.all([
+  generateMobileThirdPartyLicenses(),
+  prepareStreamScripts(),
+  generateVoiceOrbShaders(),
+]).then(() =>
+  withUniwindConfig(config, {
+    cssEntryFile: "./global.css",
+    extraThemes,
+    polyfills: { rem: 14 },
+  }),
 );

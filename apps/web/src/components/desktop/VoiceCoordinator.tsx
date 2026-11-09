@@ -110,12 +110,15 @@ function VoiceCoordinatorWithBridge({ bridge }: { bridge: DesktopVoiceBridge }) 
   // Open composer if the thread is showing, otherwise that thread's saved draft.
   const writeComposer = (delivery: DesktopVoiceDelivery, text: string) => {
     const { environmentId, threadId, replaces } = delivery;
-    if (dispatchVoiceDictation({ environmentId, threadId, text, replaces }).handled) return true;
+    const live = delivery.mode === "live";
+    if (dispatchVoiceDictation({ environmentId, threadId, text, replaces, live }).handled) {
+      return true;
+    }
     const ref = { environmentId, threadId } as ScopedThreadRef;
     const store = useComposerDraftStore.getState();
     store.setPrompt(
       ref,
-      composeDictatedPrompt(store.getComposerDraft(ref)?.prompt ?? "", text, replaces),
+      composeDictatedPrompt(store.getComposerDraft(ref)?.prompt ?? "", text, replaces, live),
     );
     return false;
   };
