@@ -3656,6 +3656,12 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
   }
 
   const electronVersion = desktopPackageJson.dependencies.electron;
+  // The lockfile pins these hashes, so packaging never depends on GitHub serving SHASUMS256.txt.
+  const electronChecksums = yield* decodeReleasePackageManifest(
+    yield* fs.readFileString(
+      path.join(repoRoot, "apps/desktop/node_modules/electron/checksums.json"),
+    ),
+  );
 
   const serverDependencies = serverPackageJson.dependencies;
   if (!serverDependencies || Object.keys(serverDependencies).length === 0) {
@@ -3936,22 +3942,25 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     homepage: "https://t3.codes",
     author: "T3 Tools",
     main: "apps/desktop/dist-electron/boot.cjs",
-    build: yield* createBuildConfig(
-      options.platform,
-      options.target,
-      appVersion,
-      options.signed,
-      options.mockUpdates,
-      options.mockUpdateServerPort,
-      macPasskeySigning && macEntitlementsPath
-        ? {
-            entitlementsPath: macEntitlementsPath,
-            provisioningProfilePath: macPasskeySigning.provisioningProfilePath,
-          }
-        : undefined,
-      bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
-      options.arch,
-    ),
+    build: {
+      ...(yield* createBuildConfig(
+        options.platform,
+        options.target,
+        appVersion,
+        options.signed,
+        options.mockUpdates,
+        options.mockUpdateServerPort,
+        macPasskeySigning && macEntitlementsPath
+          ? {
+              entitlementsPath: macEntitlementsPath,
+              provisioningProfilePath: macPasskeySigning.provisioningProfilePath,
+            }
+          : undefined,
+        bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
+        options.arch,
+      )),
+      electronDownload: { checksums: electronChecksums },
+    },
     dependencies: stageDependencies,
     devDependencies: {
       electron: electronVersion,
